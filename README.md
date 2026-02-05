@@ -2,6 +2,10 @@
 
 This CDK8s project converts the Shanoir NG Docker Compose configuration to Kubernetes manifests using CDK8s (Cloud Development Kit for Kubernetes).
 
+## DISCLAIMER: this is a work in progress
+
+The content of this repository is not ready for production.
+
 ## What's Included
 
 The generated Kubernetes manifests include:
