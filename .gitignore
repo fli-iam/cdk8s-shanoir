@@ -1,0 +1,7 @@
+/.jsii
+/dist
+/lib
+/node_modules
+/tsconfig.json
+
+.*.sw[mnop]

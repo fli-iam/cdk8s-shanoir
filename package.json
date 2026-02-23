@@ -1,0 +1,62 @@
+{
+  "name": "cdk8s-shanoir",
+  "version": "0.0.0",
+  "description": "CDK constructs for deploing Shanoir-NG on Kubernetes",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "jsii",
+    "build:watch": "jsii --watch",
+    "package": "jsii-pacmak"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fli-iam/shanoir-kubernetes.git"
+  },
+  "keywords": [],
+  "author": {
+    "name": "France Life Imaging",
+    "url": "https://github.com/fli-iam"
+  },
+  "license": "GPL-3.0-or-later",
+  "bugs": {
+    "url": "https://github.com/fli-iam/shanoir-kubernetes/issues"
+  },
+  "homepage": "https://github.com/fli-iam/shanoir-kubernetes#readme",
+  "stability": "experimental",
+  "types": "lib/index.d.ts",
+  "jsii": {
+    "versionFormat": "full",
+    "outdir": "dist",
+    "targets": {
+      "python": {
+        "distName": "cdk8s-shanoir",
+        "module": "cdk8s_shanoir"
+      }
+    },
+    "tsc": {
+      "outDir": "lib",
+      "rootDir": "src"
+    }
+  },
+  "bundleDependencies": [
+    "@types/whatwg-url",
+    "whatwg-url"
+  ],
+  "dependencies": {
+    "@types/whatwg-url": "^13.0.0",
+    "whatwg-url": "^16.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.3",
+    "cdk8s": "2.70.48",
+    "cdk8s-plus-33": "2.4.24",
+    "constructs": "10.4.5",
+    "jsii": "^5.9.26",
+    "jsii-pacmak": "^1.126.0"
+  },
+  "peerDependencies": {
+    "cdk8s": "^2.70.48",
+    "cdk8s-plus-33": "^2.4.24",
+    "constructs": "^10.4.5"
+  }
+}
