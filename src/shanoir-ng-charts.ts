@@ -37,13 +37,24 @@ type OptService<T> = T extends undefined ? undefined : Service;
 export class ShanoirNGChart extends Chart
 {
   readonly props: ShanoirNGProps;
+
   readonly commonConfigMap: ConfigMap;
   readonly secret: Secret;
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
 
+  readonly datasetsService: Service;
+  readonly dcm4cheeService: Service;
+  readonly importService: Service;
+  readonly keycloakService?: Service;
+  readonly ldapService: Service;
   readonly mysqlService?: Service;
   readonly postgresqlService?: Service;
+  readonly preclinicalService: Service;
+  readonly rabbitmqService: Service;
+  readonly solrService: Service;
+  readonly studiesService: Service;
+  readonly usersService: Service;
 
   constructor(scope: Construct, id: string, props: ShanoirNGProps)
   {
@@ -120,14 +131,14 @@ export class ShanoirNGChart extends Chart
       });
     }
 
-    this.createService("rabbitmq", [5672], {
+    this.rabbitmqService = this.createService("rabbitmq", [5672], {
       image: "rabbitmq:3.10.7",
       volumeMounts: [
         { path: "/var/lib/rabbitmq/mnesia/rabbitmq", volume: this.volumes["rabbitmq-data"] },
       ]
     });
 
-    this.createService("solr", [8983], {
+    this.solrService = this.createService("solr", [8983], {
       image: this.shanoirImage("solr"),
       envVariables: {
         SOLR_LOG_LEVEL: EnvValue.fromValue("SEVERE"),
@@ -138,7 +149,7 @@ export class ShanoirNGChart extends Chart
     if (useInternalKeycloak) {
       const db = this.mysqlDatabase("keycloak")!;
 
-      this.createService("keycloak", [8080], {
+      this.keycloakService = this.createService("keycloak", [8080], {
         image: this.shanoirImage("keycloak"),
         envFrom: [new EnvFrom(this.commonConfigMap)],
         envVariables: {
@@ -162,7 +173,7 @@ export class ShanoirNGChart extends Chart
       POSTGRES_PASSWORD: EnvValue.fromSecretValue({key: "dcm4chee", secret: this.secret}),
     };
 
-    this.createService("dcm4chee-ldap", [389], {
+    this.ldapService = this.createService("dcm4chee-ldap", [389], {
       image: "dcm4che/slapd-dcm4chee:2.6.2-27.0",
       volumeMounts: [
         { path: "/var/lib/openldap/openldap-data", volume: this.volumes["dcm4chee-ldap-data"] },
@@ -174,7 +185,7 @@ export class ShanoirNGChart extends Chart
     });
 
     if (useInternalPostgresqlDatabases) {
-      this.createService("dcm4chee-database", [5432], {
+      this.postgresqlService = this.createService("dcm4chee-database", [5432], {
         image: "dcm4che/postgres-dcm4chee:14.4-27",
         volumeMounts: [
           { path: "/var/lib/postgresql/data", volume: this.volumes["dcm4chee-database-data"] },
@@ -184,7 +195,7 @@ export class ShanoirNGChart extends Chart
     }
 
     const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
-    this.createService("dcm4chee-arc", [8080], {
+    this.dcm4cheeService = this.createService("dcm4chee-arc", [8081], {
       image: "dcm4che/dcm4chee-arc-psql:5.27.0",
       volumeMounts: [
         { path: "/opt/wildfly/standalone", volume: this.volumes["dcm4chee-arc-wildfly-data"] },
@@ -192,16 +203,27 @@ export class ShanoirNGChart extends Chart
       ],
       envVariables: {
         ...dcm4cheeDbVariables,
-        LDAP_URL: EnvValue.fromValue(`ldap://dcm4chee-ldap:389`),
+        LDAP_URL: EnvValue.fromValue(`ldap://${this.ldapService.resourceName}:389`),
         POSTGRES_HOST: EnvValue.fromValue(dcm4cheeDb.host),
         POSTGRES_PORT: EnvValue.fromValue(dcm4cheeDb.port!.toString()),
         WILDFLY_CHOWN: EnvValue.fromValue("/storage"),
-        WILDFLY_WAIT_FOR: EnvValue.fromValue("dcm4chee-ldap:389 dcm4chee-database:5432")
+        WILDFLY_WAIT_FOR: EnvValue.fromValue(
+          `${this.ldapService.resourceName}:389 ${dcm4cheeDb.host}:${dcm4cheeDb.port}`)
     }});
+
+    // create a DNS alias "dcm4chee-arc" pointing to the actual dcm4chee service
+    //
+    // The datasets container uses the dcm4chee hostname in the urls stored in the dataset_file
+    // table. Using a stable alias allows renaming the service without having to updating the whole
+    // table (useful when snapshotting an instance).
+    new Service(this, `dcm4chee-cname`, {
+      metadata: { name: "dcm4chee-arc" },
+      externalName: this.dcm4cheeService.resourceName,
+    });
 
     //////////// shanoir micro services ////////////
 
-    this.createShanoirMicroservice("users", [9901], {
+    this.usersService = this.createShanoirMicroservice("users", [9901], true, {
       envVariables: {
         ...keycloakCredentialsEnvVariables,
         ...smtpEnvVariables,
@@ -209,7 +231,7 @@ export class ShanoirNGChart extends Chart
       }
     });
 
-    this.createShanoirMicroservice("studies", [9902], {
+    this.studiesService = this.createShanoirMicroservice("studies", [9902], true, {
       extraVolumeMounts: [
         { path: "/tmp", volume: this.volumes["tmp"] },
         { path: "/var/studies-data", volume: this.volumes["studies-data"] },
@@ -218,13 +240,13 @@ export class ShanoirNGChart extends Chart
       ],
     });
 
-    this.createShanoirMicroservice("import", [9903], {
+    this.importService = this.createShanoirMicroservice("import", [9903], true, {
       extraVolumeMounts: [
         { path: "/tmp", volume: this.volumes["tmp"] },
       ],
     });
 
-    this.createShanoirMicroservice("datasets", [9904], {
+    this.datasetsService = this.createShanoirMicroservice("datasets", [9904], true, {
       envVariables: {
         ...vipEnvVariables,
         VIP_CLIENT_SECRET: EnvValue.fromSecretValue({ secret: this.secret, key: "vip-client-secret" }),
@@ -235,14 +257,14 @@ export class ShanoirNGChart extends Chart
       ],
     });
 
-    this.createShanoirMicroservice("preclinical", [9905], {
+    this.preclinicalService = this.createShanoirMicroservice("preclinical", [9905], true, {
       extraVolumeMounts: [
         { path: "/tmp", volume: this.volumes["tmp"] },
         { path: "/var/extra-data", volume: this.volumes["extra-data"] },
       ],
     });
 
-    this.createShanoirMicroservice("nifti-conversion", undefined, {
+    this.createShanoirMicroservice("nifti-conversion", undefined, false, {
       extraVolumeMounts: [
         { path: "/tmp", volume: this.volumes["tmp"] },
         { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
@@ -257,7 +279,15 @@ export class ShanoirNGChart extends Chart
         { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
       ],
       envFrom: [ new EnvFrom(this.commonConfigMap)],
-      envVariables: vipEnvVariables,
+      envVariables: {
+        ...vipEnvVariables,
+        SHANOIR_KEYCLOAK_HOST: EnvValue.fromValue(this.keycloakService!.resourceName!),
+        SHANOIR_USERS_HOST: EnvValue.fromValue(this.usersService.resourceName!),
+        SHANOIR_STUDIES_HOST: EnvValue.fromValue(this.studiesService.resourceName!),
+        SHANOIR_IMPORT_HOST: EnvValue.fromValue(this.importService.resourceName!),
+        SHANOIR_DATASETS_HOST: EnvValue.fromValue(this.datasetsService.resourceName!),
+        SHANOIR_PRECLINICAL_HOST: EnvValue.fromValue(this.preclinicalService.resourceName!),
+      },
     });
   }
 
@@ -292,6 +322,7 @@ export class ShanoirNGChart extends Chart
       port: db.port ?? 5432,
     };
   }
+
   createVolumeClaims(): {[key: string]: IPersistentVolumeClaim}
   {
     return Object.fromEntries(Object.entries(this.props.volumeClaimProps).map(
@@ -416,12 +447,6 @@ export class ShanoirNGChart extends Chart
     } else {
       assert(ports.length);
       return new Service(this, `${name}-svc`, {
-
-        // We do not const cdk8s autogenerate the service names because these names ("database",
-        // "users", ...) are hardcoded in the shanoir images for the moment (which would break service
-        // discovery)
-        metadata: { name: name },
-
         ports: ports.map((p) => ({port: p})),
         selector: deploy
       }) as OptService<P>;
@@ -433,6 +458,7 @@ export class ShanoirNGChart extends Chart
    * This function does the same as {@link createService}, but with additional common settings
    *  - set container image
    *  - use the {@link commonConfigMap}
+   *  - add the rabbitmq and database config
    *  - mount the `logs` volume)
    */
   private createShanoirMicroservice<P extends number[]|undefined>(
@@ -457,6 +483,8 @@ export class ShanoirNGChart extends Chart
         image: this.shanoirImage(name),
         envFrom: [ new EnvFrom(this.commonConfigMap), ],
         envVariables: {
+          "spring.rabbitmq.host": EnvValue.fromValue(this.rabbitmqService.resourceName!),
+          "solr.host": EnvValue.fromValue(`http://${this.solrService.resourceName}:8983/solr/shanoir`),
           ...dbVariables,
           ...props.envVariables ?? {}},
         volumeMounts: [
