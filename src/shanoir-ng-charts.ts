@@ -98,57 +98,7 @@ export class ShanoirNGChart extends Chart
       new Namespace(this, "ns", { metadata: { name: props.namespace }});
     }
 
-    //////////// shanoir micro services ////////////
-
-    this.createShanoirMicroservice("users", [9901], {
-      envVariables: {
-        ...keycloakCredentialsEnvVariables,
-        ...smtpEnvVariables,
-        "VIP_SERVICE_EMAIL": EnvValue.fromValue(props.vip!.serviceEmail),
-      }
-    });
-
-    this.createShanoirMicroservice("studies", [9902], {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/studies-data", volume: this.volumes["studies-data"] },
-        // This is related to participants.tsv file
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
-
-    this.createShanoirMicroservice("import", [9903], {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-      ],
-    });
-
-    this.createShanoirMicroservice("datasets", [9904], {
-      envVariables: {
-        ...vipEnvVariables,
-        VIP_CLIENT_SECRET: EnvValue.fromSecretValue({ secret: this.secret, key: "vip-client-secret" }),
-      },
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
-
-    this.createShanoirMicroservice("preclinical", [9905], {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/extra-data", volume: this.volumes["extra-data"] },
-      ],
-    });
-
-    this.createShanoirMicroservice("nifti-conversion", undefined, {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
-
-    //////////// extra services ////////////
+    //////////// backend services ////////////
 
     if (useInternalMysqlDatabases) {
       this.createService("database", [3306], {
@@ -204,15 +154,6 @@ export class ShanoirNGChart extends Chart
       });
     }
 
-    this.createService("nginx", [80, 443], {
-      image: this.shanoirImage("nginx"),
-      volumeMounts: [
-        { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
-      ],
-      envFrom: [ new EnvFrom(this.commonConfigMap)],
-      envVariables: vipEnvVariables,
-    });
-
     //////////// dcm4chee ////////////
 
     const dcm4cheeDb = this.props.postgresqlDatabases!["dcm4chee"]!;
@@ -257,6 +198,66 @@ export class ShanoirNGChart extends Chart
         WILDFLY_WAIT_FOR: EnvValue.fromValue("dcm4chee-ldap:389 dcm4chee-database:5432")
     }});
 
+    //////////// shanoir micro services ////////////
+
+    this.createShanoirMicroservice("users", [9901], {
+      envVariables: {
+        ...keycloakCredentialsEnvVariables,
+        ...smtpEnvVariables,
+        "VIP_SERVICE_EMAIL": EnvValue.fromValue(props.vip!.serviceEmail),
+      }
+    });
+
+    this.createShanoirMicroservice("studies", [9902], {
+      extraVolumeMounts: [
+        { path: "/tmp", volume: this.volumes["tmp"] },
+        { path: "/var/studies-data", volume: this.volumes["studies-data"] },
+        // This is related to participants.tsv file
+        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
+      ],
+    });
+
+    this.createShanoirMicroservice("import", [9903], {
+      extraVolumeMounts: [
+        { path: "/tmp", volume: this.volumes["tmp"] },
+      ],
+    });
+
+    this.createShanoirMicroservice("datasets", [9904], {
+      envVariables: {
+        ...vipEnvVariables,
+        VIP_CLIENT_SECRET: EnvValue.fromSecretValue({ secret: this.secret, key: "vip-client-secret" }),
+      },
+      extraVolumeMounts: [
+        { path: "/tmp", volume: this.volumes["tmp"] },
+        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
+      ],
+    });
+
+    this.createShanoirMicroservice("preclinical", [9905], {
+      extraVolumeMounts: [
+        { path: "/tmp", volume: this.volumes["tmp"] },
+        { path: "/var/extra-data", volume: this.volumes["extra-data"] },
+      ],
+    });
+
+    this.createShanoirMicroservice("nifti-conversion", undefined, {
+      extraVolumeMounts: [
+        { path: "/tmp", volume: this.volumes["tmp"] },
+        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
+      ],
+    });
+
+    //////////// front ////////////
+
+    this.createService("nginx", [80, 443], {
+      image: this.shanoirImage("nginx"),
+      volumeMounts: [
+        { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
+      ],
+      envFrom: [ new EnvFrom(this.commonConfigMap)],
+      envVariables: vipEnvVariables,
+    });
   }
 
   /** generate the OCI image name for a given shanoir service */
