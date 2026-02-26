@@ -136,12 +136,6 @@ export class ShanoirNGChart extends Chart
     });
 
     if (useInternalKeycloak) {
-      this.createService("keycloak-database", [3306], {
-        image: this.shanoirImage("keycloak-database"),
-        envVariables: {
-          MYSQL_DATABASE: EnvValue.fromValue("keycloak")
-        },
-      });
 
       this.createService("keycloak", [8080], {
         image: this.shanoirImage("keycloak"),
