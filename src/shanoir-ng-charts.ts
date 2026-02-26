@@ -7,8 +7,8 @@ import {
 import { URL } from "whatwg-url";
 
 import {
-  ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases, shanoirPostgresqlDatabases,
-  shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
+  ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases,
+  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
 } from "./shanoir-ng-props";
 
 /** ensure that the `map` contains all keys listed in `expect`
@@ -42,14 +42,13 @@ export class ShanoirNGChart extends Chart
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
 
-  readonly databaseService?: Service;
+  readonly mysqlService?: Service;
+  readonly postgresqlService?: Service;
 
   constructor(scope: Construct, id: string, props: ShanoirNGProps)
   {
     console.error("orig props:", props);
 
-    assert(props.mysqlDatabases == undefined); // not yet supported
-    assert(props.postgresqlDatabases == undefined); // not yet supported
     assert(props.keycloakUrl == undefined); // not yet supported
 
     // ensure all volume claims and db credentials are provided 
@@ -101,7 +100,8 @@ export class ShanoirNGChart extends Chart
     //////////// backend services ////////////
 
     if (useInternalMysqlDatabases) {
-      this.createService("database", [3306], {
+      // deploy an internal mysql container
+      this.mysqlService = this.createService("database", [3306], {
         image: this.shanoirImage("database"),
         args: [
           "--max_allowed_packet",
@@ -136,6 +136,7 @@ export class ShanoirNGChart extends Chart
     });
 
     if (useInternalKeycloak) {
+      const db = this.mysqlDatabase("keycloak")!;
 
       this.createService("keycloak", [8080], {
         image: this.shanoirImage("keycloak"),
@@ -143,6 +144,11 @@ export class ShanoirNGChart extends Chart
         envVariables: {
           ...keycloakCredentialsEnvVariables,
           ...smtpEnvVariables,
+          KC_DB_URL_HOST: EnvValue.fromValue(db.host),
+          KC_DB_URL_PORT: EnvValue.fromValue(db.port!.toString()),
+          KC_DB_URL_DATABASE: EnvValue.fromValue(db.db),
+          KC_DB_USERNAME: EnvValue.fromValue(db.username),
+          KC_DB_PASSWORD: EnvValue.fromSecretValue({ secret: this.secret, key: "keycloak" }),
           SHANOIR_ALLOWED_ADMIN_IPS: EnvValue.fromValue(this.props.allowedAdminIps!.join(",")),
         },
       });
@@ -150,10 +156,9 @@ export class ShanoirNGChart extends Chart
 
     //////////// dcm4chee ////////////
 
-    const dcm4cheeDb = this.props.postgresqlDatabases!["dcm4chee"]!;
     const dcm4cheeDbVariables = {
-      POSTGRES_DB:       EnvValue.fromValue(dcm4cheeDb.db),
-      POSTGRES_USER:     EnvValue.fromValue(dcm4cheeDb.username),
+      POSTGRES_DB:       EnvValue.fromValue(this.props.postgresqlDatabases!["dcm4chee"]!.db),
+      POSTGRES_USER:     EnvValue.fromValue(this.props.postgresqlDatabases!["dcm4chee"]!.username),
       POSTGRES_PASSWORD: EnvValue.fromSecretValue({key: "dcm4chee", secret: this.secret}),
     };
 
@@ -178,6 +183,7 @@ export class ShanoirNGChart extends Chart
       });
     }
 
+    const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
     this.createService("dcm4chee-arc", [8080], {
       image: "dcm4che/dcm4chee-arc-psql:5.27.0",
       volumeMounts: [
@@ -188,6 +194,7 @@ export class ShanoirNGChart extends Chart
         ...dcm4cheeDbVariables,
         LDAP_URL: EnvValue.fromValue(`ldap://dcm4chee-ldap:389`),
         POSTGRES_HOST: EnvValue.fromValue(dcm4cheeDb.host),
+        POSTGRES_PORT: EnvValue.fromValue(dcm4cheeDb.port!.toString()),
         WILDFLY_CHOWN: EnvValue.fromValue("/storage"),
         WILDFLY_WAIT_FOR: EnvValue.fromValue("dcm4chee-ldap:389 dcm4chee-database:5432")
     }});
@@ -260,6 +267,31 @@ export class ShanoirNGChart extends Chart
     return `${this.props.dockerRepository}/${service}:${this.props.version}`;
   }
 
+  /** get the actual parameters for a given mysql database
+   *
+   * - resolve `host` to this.mysqlService when using the internal database service
+   * - set default `port` value
+   */
+  mysqlDatabase(name: string): ShanoirDatabaseProps {
+    const db = this.props.mysqlDatabases![name]!;
+    return {...db,
+      host: ((db.host!="INTERNAL") ? db.host : this.mysqlService!.resourceName!),
+      port: db.port ?? 3306,
+    };
+  }
+
+  /** get the actual parameters for a given postgresql database
+   *
+   * - resolve `host` to this.postgreqlService when using the internal database service
+   * - set default `port` value
+   */
+  postgresqlDatabase(name: string): ShanoirDatabaseProps {
+    const db = this.props.postgresqlDatabases![name]!;
+    return {...db,
+      host: ((db.host!="INTERNAL") ? db.host : this.postgresqlService!.resourceName!),
+      port: db.port ?? 5432,
+    };
+  }
   createVolumeClaims(): {[key: string]: IPersistentVolumeClaim}
   {
     return Object.fromEntries(Object.entries(this.props.volumeClaimProps).map(
@@ -403,15 +435,30 @@ export class ShanoirNGChart extends Chart
    *  - use the {@link commonConfigMap}
    *  - mount the `logs` volume)
    */
-  private createShanoirMicroservice<P extends number[]|undefined>(name: string, ports: P, props: {
-    envVariables?: { [key: string]: EnvValue },
-    extraVolumeMounts?: VolumeMount[],
+  private createShanoirMicroservice<P extends number[]|undefined>(
+    name: string, ports: P, hasDatabase: boolean, props: {
+      envVariables?: { [key: string]: EnvValue },
+      extraVolumeMounts?: VolumeMount[],
   }): OptService<P>
   {
+    let dbVariables = {};
+    if (hasDatabase) {
+      const db = this.mysqlDatabase(name);
+      dbVariables = {
+        "SHANOIR_DB_HOST": EnvValue.fromValue(db.host),
+        "SHANOIR_DB_PORT": EnvValue.fromValue(db.port!.toString()),
+        "SHANOIR_DB_NAME": EnvValue.fromValue(db.db),
+        "spring.datasource.username": EnvValue.fromValue(db.username),
+        "spring.datasource.password": EnvValue.fromSecretValue({secret: this.secret, key: name}),
+      };
+    }
+
     return this.createService(name, ports, {
         image: this.shanoirImage(name),
         envFrom: [ new EnvFrom(this.commonConfigMap), ],
-        envVariables: props.envVariables ?? {},
+        envVariables: {
+          ...dbVariables,
+          ...props.envVariables ?? {}},
         volumeMounts: [
           { path: "/var/log/shanoir-ng-logs", volume: this.volumes["logs"]! },
           ...(props.extraVolumeMounts ?? [])

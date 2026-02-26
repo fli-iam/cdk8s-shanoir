@@ -112,7 +112,7 @@ function defaultMysqlDatabases(): {[key: string]: ShanoirDatabaseProps}
   var dbProps: {[key: string]: ShanoirDatabaseProps} = {};
   for (let db of shanoirMysqlDatabases) {
     dbProps[db] = {
-      host: "database",
+      host: "INTERNAL",
       db: db,
       username: db,
       password: db,
@@ -125,7 +125,7 @@ function defaultPostgresqlDatabases(): {[key: string]: ShanoirDatabaseProps}
 {
   return {
     "dcm4chee": {
-      host: "dcm4chee-database",
+      host: "INTERNAL",
       db: "pacsdb",
       username: "pacs",
       password: "pacs",
