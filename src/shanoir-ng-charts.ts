@@ -32,6 +32,11 @@ function checkResourceMap(desc: string, map: {[key: string]: unknown} | undefine
   }
 }
 
+/** build a k8s EnvValue from string */
+function envValue(value: string): EnvValue {
+  return EnvValue.fromValue(value);
+}
+
 type OptService<T> = T extends undefined ? undefined : Service;
 
 export class ShanoirNGChart extends Chart
@@ -122,7 +127,7 @@ export class ShanoirNGChart extends Chart
           "--ignore-db-dir=lost+found",
         ],
         envVariables: {
-          "MYSQL_ROOT_PASSWORD": EnvValue.fromValue("password"),
+          "MYSQL_ROOT_PASSWORD": envValue("password"),
           "SHANOIR_MIGRATION": EnvValue.fromConfigMap(this.commonConfigMap, "never"),
         },
         volumeMounts: [
@@ -141,7 +146,7 @@ export class ShanoirNGChart extends Chart
     this.solrService = this.createService("solr", [8983], {
       image: this.shanoirImage("solr"),
       envVariables: {
-        SOLR_LOG_LEVEL: EnvValue.fromValue("SEVERE"),
+        SOLR_LOG_LEVEL: envValue("SEVERE"),
       },
       volumeMounts: [{ path: "/var/solr", volume: this.volumes["solr-data"] }],
     });
@@ -155,12 +160,12 @@ export class ShanoirNGChart extends Chart
         envVariables: {
           ...keycloakCredentialsEnvVariables,
           ...smtpEnvVariables,
-          KC_DB_URL_HOST: EnvValue.fromValue(db.host),
-          KC_DB_URL_PORT: EnvValue.fromValue(db.port!.toString()),
-          KC_DB_URL_DATABASE: EnvValue.fromValue(db.db),
-          KC_DB_USERNAME: EnvValue.fromValue(db.username),
-          KC_DB_PASSWORD: EnvValue.fromSecretValue({ secret: this.secret, key: "keycloak" }),
-          SHANOIR_ALLOWED_ADMIN_IPS: EnvValue.fromValue(this.props.allowedAdminIps!.join(",")),
+          KC_DB_URL_HOST: envValue(db.host),
+          KC_DB_URL_PORT: envValue(db.port!.toString()),
+          KC_DB_URL_DATABASE: envValue(db.db),
+          KC_DB_USERNAME: envValue(db.username),
+          KC_DB_PASSWORD: this.secretEnvValue("keycloak"),
+          SHANOIR_ALLOWED_ADMIN_IPS: envValue(this.props.allowedAdminIps!.join(",")),
         },
       });
     }
@@ -168,9 +173,9 @@ export class ShanoirNGChart extends Chart
     //////////// dcm4chee ////////////
 
     const dcm4cheeDbVariables = {
-      POSTGRES_DB:       EnvValue.fromValue(this.props.postgresqlDatabases!["dcm4chee"]!.db),
-      POSTGRES_USER:     EnvValue.fromValue(this.props.postgresqlDatabases!["dcm4chee"]!.username),
-      POSTGRES_PASSWORD: EnvValue.fromSecretValue({key: "dcm4chee", secret: this.secret}),
+      POSTGRES_DB:       envValue(this.props.postgresqlDatabases!["dcm4chee"]!.db),
+      POSTGRES_USER:     envValue(this.props.postgresqlDatabases!["dcm4chee"]!.username),
+      POSTGRES_PASSWORD: this.secretEnvValue("dcm4chee"),
     };
 
     this.ldapService = this.createService("dcm4chee-ldap", [389], {
@@ -180,7 +185,7 @@ export class ShanoirNGChart extends Chart
         { path: "/etc/openldap/slapd.d", volume: this.volumes["dcm4chee-sldap-data"] },
       ],
       envVariables: {
-        STORAGE_DIR: EnvValue.fromValue("/storage/fs1"),
+        STORAGE_DIR: envValue("/storage/fs1"),
       },
     });
 
@@ -203,11 +208,11 @@ export class ShanoirNGChart extends Chart
       ],
       envVariables: {
         ...dcm4cheeDbVariables,
-        LDAP_URL: EnvValue.fromValue(`ldap://${this.ldapService.resourceName}:389`),
-        POSTGRES_HOST: EnvValue.fromValue(dcm4cheeDb.host),
-        POSTGRES_PORT: EnvValue.fromValue(dcm4cheeDb.port!.toString()),
-        WILDFLY_CHOWN: EnvValue.fromValue("/storage"),
-        WILDFLY_WAIT_FOR: EnvValue.fromValue(
+        LDAP_URL: envValue(`ldap://${this.ldapService.resourceName}:389`),
+        POSTGRES_HOST: envValue(dcm4cheeDb.host),
+        POSTGRES_PORT: envValue(dcm4cheeDb.port!.toString()),
+        WILDFLY_CHOWN: envValue("/storage"),
+        WILDFLY_WAIT_FOR: envValue(
           `${this.ldapService.resourceName}:389 ${dcm4cheeDb.host}:${dcm4cheeDb.port}`)
     }});
 
@@ -227,7 +232,7 @@ export class ShanoirNGChart extends Chart
       envVariables: {
         ...keycloakCredentialsEnvVariables,
         ...smtpEnvVariables,
-        "VIP_SERVICE_EMAIL": EnvValue.fromValue(props.vip!.serviceEmail),
+        "VIP_SERVICE_EMAIL": envValue(props.vip!.serviceEmail),
       }
     });
 
@@ -248,9 +253,9 @@ export class ShanoirNGChart extends Chart
 
     this.datasetsService = this.createShanoirMicroservice("datasets", [9904], true, {
       envVariables: {
-        SHANOIR_SOLR_HOST: EnvValue.fromValue(this.solrService.resourceName!),
+        SHANOIR_SOLR_HOST: envValue(this.solrService.resourceName!),
         ...vipEnvVariables,
-        VIP_CLIENT_SECRET: EnvValue.fromSecretValue({ secret: this.secret, key: "vip-client-secret" }),
+        VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
       },
       extraVolumeMounts: [
         { path: "/tmp", volume: this.volumes["tmp"] },
@@ -282,12 +287,12 @@ export class ShanoirNGChart extends Chart
       envFrom: [ new EnvFrom(this.commonConfigMap)],
       envVariables: {
         ...vipEnvVariables,
-        SHANOIR_KEYCLOAK_HOST: EnvValue.fromValue(this.keycloakService!.resourceName!),
-        SHANOIR_USERS_HOST: EnvValue.fromValue(this.usersService.resourceName!),
-        SHANOIR_STUDIES_HOST: EnvValue.fromValue(this.studiesService.resourceName!),
-        SHANOIR_IMPORT_HOST: EnvValue.fromValue(this.importService.resourceName!),
-        SHANOIR_DATASETS_HOST: EnvValue.fromValue(this.datasetsService.resourceName!),
-        SHANOIR_PRECLINICAL_HOST: EnvValue.fromValue(this.preclinicalService.resourceName!),
+        SHANOIR_KEYCLOAK_HOST: envValue(this.keycloakService!.resourceName!),
+        SHANOIR_USERS_HOST: envValue(this.usersService.resourceName!),
+        SHANOIR_STUDIES_HOST: envValue(this.studiesService.resourceName!),
+        SHANOIR_IMPORT_HOST: envValue(this.importService.resourceName!),
+        SHANOIR_DATASETS_HOST: envValue(this.datasetsService.resourceName!),
+        SHANOIR_PRECLINICAL_HOST: envValue(this.preclinicalService.resourceName!),
       },
     });
   }
@@ -352,6 +357,11 @@ export class ShanoirNGChart extends Chart
     }});
   }
 
+  /** build a k8s EnvValue from an entry in this.secret */
+  private secretEnvValue(key: string): EnvValue {
+    return EnvValue.fromSecretValue({secret: this.secret, key: key})
+  }
+
   /** common config map for all shanoir microservices */
   createCommonConfigMap(): ConfigMap
   {
@@ -396,14 +406,14 @@ export class ShanoirNGChart extends Chart
   private createSmtpEnvVariables(): { [key: string]: EnvValue }
   {
     return {
-      SHANOIR_SMTP_HOST: EnvValue.fromValue(this.props.smtp.host),
-      SHANOIR_SMTP_PORT: EnvValue.fromValue(this.props.smtp.port!.toString()),
-      SHANOIR_STMP_AUTH: EnvValue.fromValue((this.props.smtp.auth != undefined).toString()),
-      SHANOIR_SMTP_USERNAME: EnvValue.fromValue(this.props.smtp.auth?.username ?? ""),
-      SHANOIR_SMTP_STARTTLS_ENABLE: EnvValue.fromValue((this.props.smtp.starttls != "disabled").toString()),
-      SHANOIR_SMTP_STARTTLS_REQUIRED: EnvValue.fromValue((this.props.smtp.starttls == "required").toString()),
-      SHANOIR_SMTP_FROM: EnvValue.fromValue(this.props.smtp.fromAddress),
-      SHANOIR_SMTP_PASSWORD: EnvValue.fromSecretValue({secret: this.secret, key: "smtp"}),
+      SHANOIR_SMTP_HOST: envValue(this.props.smtp.host),
+      SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
+      SHANOIR_STMP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
+      SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? ""),
+      SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
+      SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
+      SHANOIR_SMTP_FROM: envValue(this.props.smtp.fromAddress),
+      SHANOIR_SMTP_PASSWORD: this.secretEnvValue("smtp"),
     };
   }
 
@@ -414,8 +424,8 @@ export class ShanoirNGChart extends Chart
     assert(url.pathname == "/");
 
     return {
-      VIP_URL_SCHEME: EnvValue.fromValue(url.protocol.replace(/:$/, "")),
-      VIP_URL_HOST: EnvValue.fromValue(url.host),
+      VIP_URL_SCHEME: envValue(url.protocol.replace(/:$/, "")),
+      VIP_URL_HOST: envValue(url.host),
     };
 
   }
@@ -423,8 +433,8 @@ export class ShanoirNGChart extends Chart
   private createKeycloakCredentialsEnvVariables(): { [key: string]: EnvValue }
   {
     return {
-      SHANOIR_KEYCLOAK_USER: EnvValue.fromValue(this.props.keycloakCredentials.username),
-      SHANOIR_KEYCLOAK_PASSWORD: EnvValue.fromSecretValue({ secret: this.secret, key: "keycloak-admin" }),
+      SHANOIR_KEYCLOAK_USER: envValue(this.props.keycloakCredentials.username),
+      SHANOIR_KEYCLOAK_PASSWORD: this.secretEnvValue("keycloak-admin"),
     };
   }
 
@@ -472,11 +482,11 @@ export class ShanoirNGChart extends Chart
     if (hasDatabase) {
       const db = this.mysqlDatabase(name);
       dbVariables = {
-        "SHANOIR_DB_HOST": EnvValue.fromValue(db.host),
-        "SHANOIR_DB_PORT": EnvValue.fromValue(db.port!.toString()),
-        "SHANOIR_DB_NAME": EnvValue.fromValue(db.db),
-        "spring.datasource.username": EnvValue.fromValue(db.username),
-        "spring.datasource.password": EnvValue.fromSecretValue({secret: this.secret, key: name}),
+        "SHANOIR_DB_HOST": envValue(db.host),
+        "SHANOIR_DB_PORT": envValue(db.port!.toString()),
+        "SHANOIR_DB_NAME": envValue(db.db),
+        "spring.datasource.username": envValue(db.username),
+        "spring.datasource.password": this.secretEnvValue(name),
       };
     }
 
@@ -484,7 +494,7 @@ export class ShanoirNGChart extends Chart
         image: this.shanoirImage(name),
         envFrom: [ new EnvFrom(this.commonConfigMap), ],
         envVariables: {
-          "spring.rabbitmq.host": EnvValue.fromValue(this.rabbitmqService.resourceName!),
+          "spring.rabbitmq.host": envValue(this.rabbitmqService.resourceName!),
           ...dbVariables,
           ...props.envVariables ?? {}},
         volumeMounts: [
