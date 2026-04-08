@@ -176,16 +176,6 @@ export class ShanoirNGChart extends Chart
 
     this.dcm4cheeService = this.deployDcm4chee();
 
-    // create a DNS alias "dcm4chee-arc" pointing to the actual dcm4chee service
-    //
-    // The datasets container uses the dcm4chee hostname in the urls stored in the dataset_file
-    // table. Using a stable alias allows renaming the service without having to updating the whole
-    // table (useful when snapshotting an instance).
-    new Service(this, `dcm4chee-cname`, {
-      metadata: { name: "dcm4chee-arc" },
-      externalName: this.dcm4cheeService.resourceName,
-    });
-
     //////////// shanoir micro services ////////////
     this.shanoirService = this.deployShanoir();
 
@@ -548,7 +538,7 @@ export class ShanoirNGChart extends Chart
   {
     const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
 
-    return this.createDeployment(this, "dcm4chee", [8081], {
+    let service = this.createDeployment(this, "dcm4chee", [8081], {
       // ldap sidecar container
       initContainers: [{
         name: "ldap",
@@ -582,6 +572,18 @@ export class ShanoirNGChart extends Chart
         },
       }],
     });
+
+    // create a DNS alias "dcm4chee-arc" pointing to the actual dcm4chee service
+    //
+    // The datasets container uses the dcm4chee hostname in the urls stored in the dataset_file
+    // table. Using a stable alias allows renaming the service without having to updating the whole
+    // table (useful when snapshotting an instance).
+    new Service(this, `dcm4chee-cname`, {
+      metadata: { name: "dcm4chee-arc" },
+      externalName: service.resourceName,
+    });
+
+    return service;
   }
 
   private deployShanoir(): Service | undefined
