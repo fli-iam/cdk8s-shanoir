@@ -2,8 +2,10 @@ import { strict as assert } from "assert";
 import { Construct } from "constructs";
 import { Chart } from "cdk8s";
 import {
-  ConfigMap, ContainerProps, Deployment, EnvFrom, EnvValue, IPersistentVolumeClaim, Namespace,
-  PersistentVolumeClaim, Secret, Service, Volume, VolumeMount } from "cdk8s-plus-33";
+  ConfigMap, ContainerProps, Deployment, DeploymentStrategy, EnvFrom, EnvValue,
+  IPersistentVolumeClaim, Namespace, PersistentVolumeClaim, Secret, Service, Volume, VolumeMount
+
+} from "cdk8s-plus-33";
 import { URL } from "whatwg-url";
 
 import {
@@ -450,6 +452,8 @@ export class ShanoirNGChart extends Chart
     OptService<P>
   {
     const deploy = new Deployment(this, `${name}-deploy`, {
+      replicas: 1,
+      strategy: DeploymentStrategy.recreate(),
       containers: [props],
     });
 
