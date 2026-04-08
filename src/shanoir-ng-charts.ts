@@ -4,7 +4,8 @@ import { Chart, Size } from "cdk8s";
 import {
   ConfigMap, ContainerProps, ContainerRestartPolicy, Deployment, DeploymentProps,
   DeploymentStrategy, EnvFrom, EnvValue, IPersistentVolumeClaim, Job, JobProps, Namespace,
-  PersistentVolumeClaim, PodSecurityContextProps, Secret, Service, Volume, VolumeMount,
+  PersistentVolumeClaim, PodSecurityContextProps, RestartPolicy, Secret, Service, Volume,
+  VolumeMount,
 
 } from "cdk8s-plus-33"; import { URL } from "whatwg-url";
 
@@ -503,11 +504,17 @@ export class ShanoirNGChart extends Chart
       };
     }
 
+    if (this.props.init) {
       return this.createDeployment(this.initChart!, "keycloak", [8080], {
         initContainers: [kcContainer("init")],
         // run keycloak normally after initialisation (needed by the 'users' container)
         containers: [kcContainer("never")],
       });
+    } else {
+      return this.createDeployment(this, "keycloak", [8080], {
+      containers: [kcContainer("never")]
+      });
+    }
   }
 
   private deploySolr(): Service
@@ -566,6 +573,12 @@ export class ShanoirNGChart extends Chart
 
   private deployShanoir(): Service | undefined
   {
+    const migrationsDb = this.mysqlDatabase("migrations");
+    // TODO: https://github.com/fli-iam/shanoir-ng/issues/3430
+    assert(migrationsDb.db=="migrations" &&
+           migrationsDb.username=="migrations" &&
+           migrationsDb.password=="password");
+
     let self=this;
     function shanoirContainer(name: string, hasDatabase: boolean,
                               props: {
@@ -590,6 +603,7 @@ export class ShanoirNGChart extends Chart
           image: self.shanoirImage(name),
           envFrom: [ new EnvFrom(self.commonConfigMap), ],
           envVariables: {
+            SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
             "spring.rabbitmq.host": envValue(self.rabbitmqService.resourceName!),
             "spring.security.oauth2.resourceserver.jwt.issuer-uri":
               envValue(`${self.keycloakUrl()}/realms/shanoir-ng`),
@@ -608,6 +622,16 @@ export class ShanoirNGChart extends Chart
     }
 
     let shanoirProps = {
+      initContainers: [ {
+          name: "database-migrations",
+          image: this.shanoirImage("database-migrations"),
+          envVariables: {
+            // TODO: support db/port/username/password
+            MYSQL_HOST: envValue(migrationsDb.host),
+            SHANOIR_MIGRATION: envValue(this.props.init! ? "init" : "manual"),
+          },
+        }
+      ],
       containers: [
         shanoirContainer("users", true, {
           envVariables: {
@@ -646,6 +670,16 @@ export class ShanoirNGChart extends Chart
         }),
     ]};
 
+    if (this.props.init!) {
+      // initialisation mode
+      this.createJob(this.initChart!, "shanoir", {
+        ...shanoirProps,
+        restartPolicy: RestartPolicy.NEVER,
+      });
+      return undefined;
+
+    } else {
+      // normal mode
       this.createDeployment(this, "nifti-conversion", undefined, { containers: [
         shanoirContainer("nifti-conversion", false, {
           extraVolumeMounts: [
@@ -655,6 +689,7 @@ export class ShanoirNGChart extends Chart
       ]});
 
       return this.createDeployment(this, "shanoir", [9901, 9902, 9903, 9904, 9905], shanoirProps);
+    }
   }
 
   private deployNginx(): Service
