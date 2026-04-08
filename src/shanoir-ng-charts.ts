@@ -93,6 +93,14 @@ export class ShanoirNGChart extends Chart
     super(scope, id, props);
     this.props = props;
 
+    //////////// namespace ////////////
+
+    if (props.createNamespace) {
+      new Namespace(this, "ns", { metadata: { name: props.namespace }});
+    }
+
+    //////////// volumes ////////////
+
     // prepare the volume configs to be used in the containers
     this.volumeClaims = Object.fromEntries(Object.entries(this.props.volumeClaimProps).map(
       ([name, props]) => [name, new PersistentVolumeClaim(this, `${name}-pvc`, props)]));
@@ -108,12 +116,6 @@ export class ShanoirNGChart extends Chart
     const smtpEnvVariables = this.createSmtpEnvVariables();
     const vipEnvVariables = this.createVipEnvVariables();
     const keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
-
-    //////////// namespace ////////////
-
-    if (props.createNamespace) {
-      new Namespace(this, "ns", { metadata: { name: props.namespace }});
-    }
 
     //////////// backend services ////////////
 
