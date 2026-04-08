@@ -14,6 +14,9 @@ import {
   shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
 } from "./shanoir-ng-props";
 
+//TODO: allocate resources (see #11)
+const noResources = { resources: {} };
+
 /** ensure that the `map` contains all keys listed in `expect`
  *
  * - raise an exception if a key is missing
@@ -163,6 +166,7 @@ export class ShanoirNGChart extends Chart
     if (useInternalPostgresqlDatabases) {
       this.postgresqlService = this.createDeployment(this, "dcm4chee-database", [5432], { containers: [{
         image: "dcm4che/postgres-dcm4chee:14.4-27",
+        ...noResources,
         volumeMounts: [
           { path: "/var/lib/postgresql/data", volume: this.volumes["dcm4chee-database-data"] },
         ],
@@ -427,6 +431,7 @@ export class ShanoirNGChart extends Chart
   {
     return this.createDeployment(this, "rabbitmq", [5672], { containers: [{
       image: "rabbitmq:3.10.7",
+      ...noResources,
       volumeMounts: [
         { path: "/var/lib/rabbitmq/mnesia", volume: this.volumes["rabbitmq-data"] },
         { path: "/var/log/rabbitmq", volume: this.volumes["logs"], subPath: "rabbitmq" },
@@ -451,6 +456,7 @@ export class ShanoirNGChart extends Chart
       return this.createDeployment(this, name, [3306], { 
         containers: [{
           image: this.shanoirImage(name),
+          ...noResources,
           args: [
             // Fix k8s and old mysql
             // https://stackoverflow.com/questions/37644118/initializing-mysql-directory-error
@@ -480,6 +486,7 @@ export class ShanoirNGChart extends Chart
     function kcContainer(migration: string): ContainerProps {
       return {
         image: self.shanoirImage("keycloak"),
+        ...noResources,
         envFrom: [new EnvFrom(self.commonConfigMap)],
         envVariables: {
           ...self.keycloakCredentialsEnvVariables,
@@ -523,6 +530,7 @@ export class ShanoirNGChart extends Chart
 
     return this.createDeployment(this, "solr", [8983], { containers: [{
       image: this.shanoirImage("solr"),
+      ...noResources,
       envVariables: {
         SOLR_LOG_LEVEL: envValue("SEVERE"),
       },
@@ -543,6 +551,7 @@ export class ShanoirNGChart extends Chart
         name: "ldap",
         restartPolicy: ContainerRestartPolicy.ALWAYS,
         image: "dcm4che/slapd-dcm4chee:2.6.2-27.0",
+        ...noResources,
         volumeMounts: [
           { path: "/var/lib/openldap/openldap-data", volume: this.volumes["dcm4chee-ldap-data"] },
           { path: "/etc/openldap/slapd.d", volume: this.volumes["dcm4chee-sldap-data"] },
@@ -555,6 +564,7 @@ export class ShanoirNGChart extends Chart
       containers: [{
         name: "dcm4chee-arc",
         image: "dcm4che/dcm4chee-arc-psql:5.27.0",
+        ...noResources,
         volumeMounts: [
           { path: "/opt/wildfly/standalone", volume: this.volumes["dcm4chee-arc-wildfly-data"] },
           { path: "/storage", volume: this.volumes["dcm4chee-arc-storage-data"] },
@@ -601,6 +611,7 @@ export class ShanoirNGChart extends Chart
       return {
           name: name,
           image: self.shanoirImage(name),
+          ...noResources,
           envFrom: [ new EnvFrom(self.commonConfigMap), ],
           envVariables: {
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
@@ -625,6 +636,7 @@ export class ShanoirNGChart extends Chart
       initContainers: [ {
           name: "database-migrations",
           image: this.shanoirImage("database-migrations"),
+          ...noResources,
           envVariables: {
             // TODO: support db/port/username/password
             MYSQL_HOST: envValue(migrationsDb.host),
@@ -696,6 +708,7 @@ export class ShanoirNGChart extends Chart
   {
     return this.createDeployment(this, "nginx", [80], { containers: [{
       image: this.shanoirImage("nginx"),
+      ...noResources,
       volumeMounts: [
         { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
       ],
