@@ -45,8 +45,15 @@ export class ShanoirNGChart extends Chart
 {
   readonly props: ShanoirNGProps;
 
+  private readonly url: URL;
+  private readonly viewerUrl: URL;
+
   readonly commonConfigMap: ConfigMap;
   readonly secret: Secret;
+  readonly smtpEnvVariables: {[key: string]: EnvValue};
+  readonly vipEnvVariables: {[key: string]: EnvValue};
+  readonly keycloakCredentialsEnvVariables: {[key: string]: EnvValue};
+
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
 
@@ -108,14 +115,18 @@ export class ShanoirNGChart extends Chart
     this.volumes = Object.fromEntries(Object.entries(this.volumeClaims).map(
       ([name, pvc]) => [name, Volume.fromPersistentVolumeClaim(this, `${name}-rv`, pvc)]));
 
+    //////////// env vars ////////////
 
-    // prepare the environment variables
+    // parse the urls and prepare the environment variables
+    this.url = new URL(props.url);
+    this.viewerUrl = new URL(props.viewerUrl);
+
     this.commonConfigMap = this.createCommonConfigMap();
 
     this.secret = this.createSecret();
-    const smtpEnvVariables = this.createSmtpEnvVariables();
-    const vipEnvVariables = this.createVipEnvVariables();
-    const keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
+    this.smtpEnvVariables = this.createSmtpEnvVariables();
+    this.vipEnvVariables = this.createVipEnvVariables();
+    this.keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
 
     //////////// backend services ////////////
 
@@ -162,8 +173,8 @@ export class ShanoirNGChart extends Chart
         image: this.shanoirImage("keycloak"),
         envFrom: [new EnvFrom(this.commonConfigMap)],
         envVariables: {
-          ...keycloakCredentialsEnvVariables,
-          ...smtpEnvVariables,
+          ...this.keycloakCredentialsEnvVariables,
+          ...this.smtpEnvVariables,
           KC_DB_URL_HOST: envValue(db.host),
           KC_DB_URL_PORT: envValue(db.port!.toString()),
           KC_DB_URL_DATABASE: envValue(db.db),
@@ -234,8 +245,8 @@ export class ShanoirNGChart extends Chart
 
     this.usersService = this.createShanoirMicroservice("users", [9901], true, {
       envVariables: {
-        ...keycloakCredentialsEnvVariables,
-        ...smtpEnvVariables,
+        ...this.keycloakCredentialsEnvVariables,
+        ...this.smtpEnvVariables,
         "VIP_SERVICE_EMAIL": envValue(props.vip!.serviceEmail),
       }
     });
@@ -258,7 +269,7 @@ export class ShanoirNGChart extends Chart
     this.datasetsService = this.createShanoirMicroservice("datasets", [9904], true, {
       envVariables: {
         SHANOIR_SOLR_HOST: envValue(this.solrService.resourceName!),
-        ...vipEnvVariables,
+        ...this.vipEnvVariables,
         VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
       },
       extraVolumeMounts: [
@@ -290,7 +301,7 @@ export class ShanoirNGChart extends Chart
       ],
       envFrom: [ new EnvFrom(this.commonConfigMap)],
       envVariables: {
-        ...vipEnvVariables,
+        ...this.vipEnvVariables,
         SHANOIR_KEYCLOAK_HOST: envValue(this.keycloakService!.resourceName!),
         SHANOIR_USERS_HOST: envValue(this.usersService.resourceName!),
         SHANOIR_STUDIES_HOST: envValue(this.studiesService.resourceName!),
@@ -369,20 +380,18 @@ export class ShanoirNGChart extends Chart
   /** common config map for all shanoir microservices */
   createCommonConfigMap(): ConfigMap
   {
-    const url = new URL(this.props.url);
-    assert(url.port == "");
-    assert(url.pathname == "/");
-    const viewerUrl = new URL(this.props.viewerUrl);
-    assert(viewerUrl.port == "")
-    assert(viewerUrl.pathname == "/")
+    assert(this.url.port == "");
+    assert(this.url.pathname == "/");
+    assert(this.viewerUrl.port == "")
+    assert(this.viewerUrl.pathname == "/")
 
 
     return new ConfigMap(this, "common-cm", { data: {
       SHANOIR_PREFIX: "",
-      SHANOIR_URL_SCHEME: url.protocol.replace(/:$/, ""),
-      SHANOIR_URL_HOST: url.host,
-      SHANOIR_VIEWER_OHIF_URL_SCHEME: viewerUrl.protocol.replace(/:$/, ""),
-      SHANOIR_VIEWER_OHIF_URL_HOST: viewerUrl.host,
+      SHANOIR_URL_SCHEME: this.url.protocol.replace(/:$/, ""),
+      SHANOIR_URL_HOST: this.url.host,
+      SHANOIR_VIEWER_OHIF_URL_SCHEME: this.viewerUrl.protocol.replace(/:$/, ""),
+      SHANOIR_VIEWER_OHIF_URL_HOST: this.viewerUrl.host,
 
       SHANOIR_ADMIN_EMAIL: this.props.adminEmail,
       SHANOIR_ADMIN_NAME: this.props.adminName,
