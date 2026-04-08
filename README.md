@@ -18,9 +18,9 @@ new ShanoirNGChart(app, 'dummy', {
   adminName: "Dummy Admin",
   adminEmail: "admin@shanoir-dummy.localhost",
   smtp: {
-    host: "dummy-stmp.localhost",
+    host: "dummy-smtp.localhost",
     fromAddress: "no-reply@shanoir-dummy.localhost",
-    auth: { username: "smtp-user", password: "stmp-pass" },
+    auth: { username: "smtp-user", password: "smtp-pass" },
   },
   keycloakCredentials: { username: "admin", password: "qzflpuy;" },
   volumeClaimProps: Object.fromEntries(shanoirVolumes.map((name) => [name, {}])),

@@ -421,7 +421,7 @@ export class ShanoirNGChart extends Chart
     return {
       SHANOIR_SMTP_HOST: envValue(this.props.smtp.host),
       SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
-      SHANOIR_STMP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
+      SHANOIR_SMTP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
       SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? ""),
       SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
       SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
