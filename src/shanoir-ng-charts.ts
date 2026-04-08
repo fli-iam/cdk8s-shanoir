@@ -2,8 +2,9 @@ import { strict as assert } from "assert";
 import { Construct } from "constructs";
 import { Chart } from "cdk8s";
 import {
-  ConfigMap, ContainerProps, Deployment, DeploymentStrategy, EnvFrom, EnvValue,
-  IPersistentVolumeClaim, Namespace, PersistentVolumeClaim, Secret, Service, Volume, VolumeMount
+  ConfigMap, ContainerProps, Deployment, DeploymentProps, DeploymentStrategy, EnvFrom, EnvValue,
+  IPersistentVolumeClaim, Job, JobProps, Namespace, PersistentVolumeClaim, PodSecurityContextProps,
+  Secret, Service, Volume, VolumeMount
 
 } from "cdk8s-plus-33";
 import { URL } from "whatwg-url";
@@ -518,4 +519,78 @@ export class ShanoirNGChart extends Chart
         ],
     });
   }
+
+  /** Add uid/gid parameters to a security context
+   *
+   * The resulting security context is created with the 'user', 'group' and 'fsGroup' initialised
+   * with the uid listed in {@link ShanoirNGProps.uids}.
+   */
+  private securityContext(name: string, props?: PodSecurityContextProps): PodSecurityContextProps
+  {
+    const uid = this.props.uids![name];
+    return {
+        user: uid,
+        group: uid,
+        //FIXME: fsGroup may not have any effects at all
+        //  - on ReadWriteMany pvcs
+        //  - on hostpath volumes
+        //https://github.com/kubernetes/website/issues/46688
+        fsGroup: uid,
+        //FIXME: should allow setting the policy to ALWAYS?
+        //fsGroupChangePolicy: FsGroupChangePolicy.ON_ROOT_MISMATCH,
+        ...(props ?? {}),
+      }
+  }
+
+  /** common generic function for creating a deployment + an associated service
+   *
+   * @param scope  parent chart
+   * @param name   base name of the deployment and service
+   * @param ports  list of TCP ports included in the service
+   * @param props  deployment properties (with 'replicas: 1' and 'strategy: "Recreate"' by
+   *               default)
+   * @return       the created service (if `ports` is defined) or undefined (if `ports` is
+   *               undefined)
+   *
+   * 'props.securityContext' is processed through {@link this.securityContext}.
+   */
+  private createDeployment<P extends number[]|undefined>(scope: Chart, name: string, ports: P, props: DeploymentProps):
+    OptService<P>
+  {
+    const deploy = new Deployment(scope, `${name}-deploy`, {
+      replicas: 1,
+      strategy: DeploymentStrategy.recreate(),
+      ...props,
+      securityContext: this.securityContext(name, props.securityContext),
+    });
+
+    if (typeof ports === "undefined") {
+      return undefined as OptService<P>;
+    } else {
+      assert(ports.length);
+      return new Service(scope, `${name}-svc`, {
+        ports: ports.map((p) => ({port: p, name: p.toString()})),
+        selector: deploy
+      }) as OptService<P>;
+    }
+  }
+
+  /** common generic function for creating a job
+   *
+   * @param scope  parent chart
+   * @param name   base name of the deployment and service
+   * @param ports  list of TCP ports included in the service
+   * @param props  job properties
+   * @return       the created job
+   *
+   * 'props.securityContext' is processed through {@link this.securityContext}.
+   */
+  private createJob(scope: Chart, name: string, props: JobProps): Job
+  {
+    return new Job(scope, `${name}-job`, {
+      ...props,
+      securityContext: this.securityContext(name, props.securityContext),
+    });
+  }
+
 }
