@@ -1,6 +1,6 @@
 import { strict as assert } from "assert";
 import { Construct } from "constructs";
-import { Chart } from "cdk8s";
+import { Chart, Size } from "cdk8s";
 import {
   ConfigMap, ContainerProps, ContainerRestartPolicy, Deployment, DeploymentProps,
   DeploymentStrategy, EnvFrom, EnvValue, IPersistentVolumeClaim, Job, JobProps, Namespace,
@@ -196,6 +196,12 @@ export class ShanoirNGChart extends Chart
   shanoirImage(service: string): string
   {
     return `${this.props.dockerRepository}/${service}:${this.props.version}`;
+  }
+
+  /** get the url of the keycloak service */
+  keycloakUrl(): string
+  {
+    return this.props.keycloakUrl ??  `http://${this.keycloakService!.resourceName!}:8080/auth`;
   }
 
   /** get the actual parameters for a given mysql database
@@ -422,6 +428,7 @@ export class ShanoirNGChart extends Chart
       image: "rabbitmq:3.10.7",
       volumeMounts: [
         { path: "/var/lib/rabbitmq/mnesia", volume: this.volumes["rabbitmq-data"] },
+        { path: "/var/log/rabbitmq", volume: this.volumes["logs"], subPath: "rabbitmq" },
       ],
     }]});
   }
@@ -438,6 +445,7 @@ export class ShanoirNGChart extends Chart
           extraEnv: {} as {[key: string]: EnvValue},
           extraArgs: [ "--max_allowed_packet", "20000000"],
         };
+      let tmp = Volume.fromEmptyDir(this, `${name}-tmp`, "tmp", { sizeLimit: Size.mebibytes(8) });
 
       return this.createDeployment(this, name, [3306], { 
         containers: [{
@@ -454,6 +462,9 @@ export class ShanoirNGChart extends Chart
           },
           volumeMounts: [
             { path: "/var/lib/mysql",       volume: this.volumes[opt.volumeName] },
+            { path: "/tmp",                 volume: tmp, subPath: "tmp" },
+            { path: "/var/lib/mysql-files", volume: tmp, subPath: "mysql-files" },
+            { path: "/var/run/mysqld",      volume: tmp, subPath: "mysqld" },
           ],
         }],
       });
@@ -462,6 +473,7 @@ export class ShanoirNGChart extends Chart
   private deployKeycloak(): Service
   {
     const db = this.mysqlDatabase("keycloak")!;
+    let tmp = Volume.fromEmptyDir(this, "keycloak-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
 
     let self = this;
     function kcContainer(migration: string): ContainerProps {
@@ -480,7 +492,15 @@ export class ShanoirNGChart extends Chart
           SHANOIR_MIGRATION: envValue(migration),
           
         },
-      }
+        volumeMounts: [
+          { path: "/tmp", volume: tmp },
+        ],
+        securityContext: {
+          // the image must be mounted in read-write mode because keycloak may rebuild the
+          // executable on startup
+          readOnlyRootFilesystem: false,
+        }
+      };
     }
 
       return this.createDeployment(this.initChart!, "keycloak", [8080], {
@@ -492,6 +512,8 @@ export class ShanoirNGChart extends Chart
 
   private deploySolr(): Service
   {
+    let tmp = Volume.fromEmptyDir(this, "solr-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
+
     return this.createDeployment(this, "solr", [8983], { containers: [{
       image: this.shanoirImage("solr"),
       envVariables: {
@@ -499,6 +521,7 @@ export class ShanoirNGChart extends Chart
       },
       volumeMounts: [
         { path: "/var/solr", volume: this.volumes["solr-data"] },
+        { path: "/tmp", volume: tmp },
       ],
     }]});
   }
@@ -568,6 +591,9 @@ export class ShanoirNGChart extends Chart
           envFrom: [ new EnvFrom(self.commonConfigMap), ],
           envVariables: {
             "spring.rabbitmq.host": envValue(self.rabbitmqService.resourceName!),
+            "spring.security.oauth2.resourceserver.jwt.issuer-uri":
+              envValue(`${self.keycloakUrl()}/realms/shanoir-ng`),
+
             ...dbVariables,
             ...props.envVariables ?? {}},
           volumeMounts: [
@@ -587,6 +613,8 @@ export class ShanoirNGChart extends Chart
           envVariables: {
             ...this.keycloakCredentialsEnvVariables,
             ...this.smtpEnvVariables,
+            "kc.admin.client.server.url": envValue(
+              `http://${this.keycloakService!.resourceName}:8080/auth`),
             "VIP_SERVICE_EMAIL": envValue(this.props.vip!.serviceEmail),
           },
         }),
@@ -647,6 +675,11 @@ export class ShanoirNGChart extends Chart
         SHANOIR_DATASETS_HOST: envValue(this.shanoirService!.resourceName!),
         SHANOIR_PRECLINICAL_HOST: envValue(this.shanoirService!.resourceName!),
       },
+      // FIXME: should not run as root
+      securityContext: {
+        ensureNonRoot: false,
+        readOnlyRootFilesystem: false
+      }
     }]});
   }
 

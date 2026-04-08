@@ -115,7 +115,7 @@ function defaultMysqlDatabases(): {[key: string]: ShanoirDatabaseProps}
       host: "INTERNAL",
       db: db,
       username: db,
-      password: db,
+      password: "password",
     };
   }
   return dbProps;
