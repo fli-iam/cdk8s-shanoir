@@ -144,7 +144,7 @@ export const defaultUids = {
 
 /** Default values for {@link ShanoirNGProps} */
 export const shanoirNGDefaults = {
-  version: "NG_v2.9.2",
+  version: "NG_v2.10.0",
   instanceName: "",
   instanceColor: "",
   dockerRepository: "ghcr.io/fli-iam/shanoir-ng",
