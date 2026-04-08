@@ -71,6 +71,15 @@ export class ShanoirNGChart extends Chart
   readonly studiesService: Service;
   readonly usersService: Service;
 
+  /** Additional chart for initialising a new shanoir instance from scratch
+   *
+   * This chart contains all the dangerous deployments and jobs that must never be run on an
+   * existing instance (because they wipe out existing data).
+   *
+   * The name of this chart starts with 'danger-' to prevent accidental misuse.
+   */
+  readonly initChart?: Chart;
+
   constructor(scope: Construct, id: string, props: ShanoirNGProps)
   {
     console.error("orig props:", props);
@@ -100,6 +109,10 @@ export class ShanoirNGChart extends Chart
 
     super(scope, id, props);
     this.props = props;
+
+    if (props.init) {
+      this.initChart = new Chart(scope, `danger-${id}-init`, props);
+    }
 
     //////////// namespace ////////////
 
@@ -544,7 +557,8 @@ export class ShanoirNGChart extends Chart
 
   /** common generic function for creating a deployment + an associated service
    *
-   * @param scope  parent chart
+   * @param scope  parent chart, should be `this` for regular deployments or `this.initChart` for
+   *               initialisation deployments (which are dangerous)
    * @param name   base name of the deployment and service
    * @param ports  list of TCP ports included in the service
    * @param props  deployment properties (with 'replicas: 1' and 'strategy: "Recreate"' by
@@ -577,7 +591,8 @@ export class ShanoirNGChart extends Chart
 
   /** common generic function for creating a job
    *
-   * @param scope  parent chart
+   * @param scope  parent chart, should be `this` for regular jobs or `this.initChart` for
+   *               initialisation jobs (which are dangerous)
    * @param name   base name of the deployment and service
    * @param ports  list of TCP ports included in the service
    * @param props  job properties

@@ -149,6 +149,7 @@ export const shanoirNGDefaults = {
   mysqlDatabases: defaultMysqlDatabases(),
   postgresqlDatabases: defaultPostgresqlDatabases(),
   uids: defaultUids,
+  init: false,
 };
 
 export interface ShanoirNGProps extends ChartProps {
@@ -244,4 +245,16 @@ export interface ShanoirNGProps extends ChartProps {
    * @default see {@link shanoirNGPropsDefaults}
    */
   readonly uids?: {[key:string]: number};
+
+  /** Flag for initialising a new shanoir instance
+   *
+   * Set this flag to 'true' when deploying a new shanoir instance.
+   *
+   * This will generate an additional chart with a name starting with 'danger-init-' and providing
+   * the deployments and jobs to carry out the initial migrations.
+   *
+   * This additional chart performs destructive operations (especialy the databases are wiped out).
+   * It must never be run on a pre-existing production instance.
+   */
+  readonly init?: boolean;
 }
