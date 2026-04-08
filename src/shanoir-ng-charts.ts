@@ -3,9 +3,9 @@ import { Construct } from "constructs";
 import { Chart, Size } from "cdk8s";
 import {
   ConfigMap, ContainerProps, ContainerRestartPolicy, Deployment, DeploymentProps,
-  DeploymentStrategy, EnvFrom, EnvValue, IPersistentVolumeClaim, Job, JobProps, Namespace,
-  PersistentVolumeClaim, PodSecurityContextProps, RestartPolicy, Secret, Service, Volume,
-  VolumeMount,
+  DeploymentStrategy, EnvFrom, EnvValue, Ingress, IngressBackend, IPersistentVolumeClaim, Job,
+  JobProps, Namespace, PersistentVolumeClaim, PodSecurityContextProps, RestartPolicy, Secret,
+  Service, Volume, VolumeMount,
 
 } from "cdk8s-plus-33"; import { URL } from "whatwg-url";
 
@@ -194,6 +194,9 @@ export class ShanoirNGChart extends Chart
 
     if (!this.props.init) {
       this.nginxService = this.deployNginx();
+
+      this.createIngress();
+
     }
   }
 
@@ -731,4 +734,46 @@ export class ShanoirNGChart extends Chart
     }]});
   }
 
+  private createIngress(): Ingress
+  {
+    let ingress = this.props.ingress;
+    let tls = undefined;
+    let keycloakRules = undefined;
+
+    if (ingress.tlsCrt && ingress.tlsKey) {
+      tls = [{
+        hosts: [this.url.host, this.viewerUrl.host],
+        secret: new Secret(this, "tls-sec", { stringData: {
+          "tls.crt": ingress.tlsCrt,
+          "tls.key": ingress.tlsKey,
+        }})}];
+    }
+
+    if (this.keycloakService != undefined && ingress.exposeKeycloakAdminConsole) { 
+      let keycloakBackend = IngressBackend.fromService(this.keycloakService);
+      keycloakRules = [
+        { host: this.url.host, path: "/auth/admin/", backend: keycloakBackend},
+        { host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend},
+      ];
+    }
+
+    let nginxBackend = IngressBackend.fromService(this.nginxService!);
+
+    return new Ingress(this, "ing", {
+      className: ingress.className,
+      metadata: {
+        annotations: {
+          // FIXME: shanoir should never return a http: url
+          "nginx.ingress.kubernetes.io/proxy-redirect-from": `http://${this.url.host}`,
+          "nginx.ingress.kubernetes.io/proxy-redirect-to":  `https://${this.url.host}`,
+        },
+      },
+      tls: tls,
+      rules: [
+        { host: this.url.host, backend: nginxBackend },
+        { host: this.viewerUrl.host, backend: nginxBackend },
+        ...(keycloakRules ?? [])
+      ],
+    });
+}
 }

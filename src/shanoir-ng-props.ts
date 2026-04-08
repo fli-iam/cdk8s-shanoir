@@ -158,6 +158,33 @@ export const shanoirNGDefaults = {
   init: false,
 };
 
+export interface ShanoirIngressProps {
+  /** Ingress class */
+  readonly className?: string
+
+  /** TLS certificate (PEM format)
+   *
+   * It must cover the two domains listed in {@link ShanoirNGProps.url} and {@link
+   * ShanoirNGProps.viewerUrl}.
+   *
+   * If unset then it is up to the ingress controller to generate a self-signed certificate.
+   */
+  readonly tlsCrt?: string;
+
+  /** TLS key (PEM format) 
+  *
+  * see {@link tlsCrt}
+  * */
+  readonly tlsKey?: string;
+
+  /** Expose the keycloak admin console and the master realm in the ingress rules
+   *
+   * By default the ingress rule only exposes the routes to the shanoir-ng realm (for security
+   * reasons).
+   */
+  readonly exposeKeycloakAdminConsole?: boolean; 
+};
+
 export interface ShanoirNGProps extends ChartProps {
 
   /** Version of shanoir to be deployed (tag of the OCI images)
@@ -233,6 +260,9 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Volumes claim properties for this shanoir instance */
   readonly volumeClaimProps: { [key: string]: PersistentVolumeClaimProps};
+
+  /** Ingress configuration */
+  readonly ingress: ShanoirIngressProps;
 
   /** Create the kubernetes namespace
    *
