@@ -2,12 +2,11 @@ import { strict as assert } from "assert";
 import { Construct } from "constructs";
 import { Chart } from "cdk8s";
 import {
-  ConfigMap, ContainerProps, Deployment, DeploymentProps, DeploymentStrategy, EnvFrom, EnvValue,
-  IPersistentVolumeClaim, Job, JobProps, Namespace, PersistentVolumeClaim, PodSecurityContextProps,
-  Secret, Service, Volume, VolumeMount
+  ConfigMap, ContainerProps, ContainerRestartPolicy, Deployment, DeploymentProps,
+  DeploymentStrategy, EnvFrom, EnvValue, IPersistentVolumeClaim, Job, JobProps, Namespace,
+  PersistentVolumeClaim, PodSecurityContextProps, Secret, Service, Volume, VolumeMount,
 
-} from "cdk8s-plus-33";
-import { URL } from "whatwg-url";
+} from "cdk8s-plus-33"; import { URL } from "whatwg-url";
 
 import {
   ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases,
@@ -54,22 +53,19 @@ export class ShanoirNGChart extends Chart
   readonly smtpEnvVariables: {[key: string]: EnvValue};
   readonly vipEnvVariables: {[key: string]: EnvValue};
   readonly keycloakCredentialsEnvVariables: {[key: string]: EnvValue};
+  readonly dcm4cheeDbEnvVariables: {[key: string]: EnvValue};
 
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
-
-  readonly datasetsService: Service;
   readonly dcm4cheeService: Service;
-  readonly importService: Service;
   readonly keycloakService?: Service;
-  readonly ldapService: Service;
+  readonly keycloakMysqlService?: Service;
   readonly mysqlService?: Service;
+  readonly nginxService?: Service;
   readonly postgresqlService?: Service;
-  readonly preclinicalService: Service;
   readonly rabbitmqService: Service;
+  readonly shanoirService?: Service;
   readonly solrService: Service;
-  readonly studiesService: Service;
-  readonly usersService: Service;
 
   /** Additional chart for initialising a new shanoir instance from scratch
    *
@@ -141,109 +137,39 @@ export class ShanoirNGChart extends Chart
     this.smtpEnvVariables = this.createSmtpEnvVariables();
     this.vipEnvVariables = this.createVipEnvVariables();
     this.keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
+    this.dcm4cheeDbEnvVariables = this.createDcm4cheeDbEnvVariables();
 
     //////////// backend services ////////////
 
     if (useInternalMysqlDatabases) {
       // deploy an internal mysql container
-      this.mysqlService = this.createService("database", [3306], {
-        image: this.shanoirImage("database"),
-        args: [
-          "--max_allowed_packet",
-          "20000000",
-          // Fix k8s and old mysql
-          // https://stackoverflow.com/questions/37644118/initializing-mysql-directory-error
-          "--ignore-db-dir=lost+found",
-        ],
-        envVariables: {
-          "MYSQL_ROOT_PASSWORD": envValue("password"),
-          "SHANOIR_MIGRATION": EnvValue.fromConfigMap(this.commonConfigMap, "never"),
-        },
-        volumeMounts: [
-          { path: "/var/lib/mysql", volume: this.volumes["database-data"] },
-        ],
-      });
+      this.mysqlService = this.deployMysqlDatabase("database");
+
+      if (useInternalKeycloak) {
+        this.keycloakMysqlService = this.deployMysqlDatabase("keycloak-database");
+      }
     }
 
-    this.rabbitmqService = this.createService("rabbitmq", [5672], {
-      image: "rabbitmq:3.10.7",
-      volumeMounts: [
-        { path: "/var/lib/rabbitmq/mnesia/rabbitmq", volume: this.volumes["rabbitmq-data"] },
-      ]
-    });
+    this.rabbitmqService = this.deployRabbitmq();
 
-    this.solrService = this.createService("solr", [8983], {
-      image: this.shanoirImage("solr"),
-      envVariables: {
-        SOLR_LOG_LEVEL: envValue("SEVERE"),
-      },
-      volumeMounts: [{ path: "/var/solr", volume: this.volumes["solr-data"] }],
-    });
+    this.solrService = this.deploySolr();
 
     if (useInternalKeycloak) {
-      const db = this.mysqlDatabase("keycloak")!;
-
-      this.keycloakService = this.createService("keycloak", [8080], {
-        image: this.shanoirImage("keycloak"),
-        envFrom: [new EnvFrom(this.commonConfigMap)],
-        envVariables: {
-          ...this.keycloakCredentialsEnvVariables,
-          ...this.smtpEnvVariables,
-          KC_DB_URL_HOST: envValue(db.host),
-          KC_DB_URL_PORT: envValue(db.port!.toString()),
-          KC_DB_URL_DATABASE: envValue(db.db),
-          KC_DB_USERNAME: envValue(db.username),
-          KC_DB_PASSWORD: this.secretEnvValue("keycloak"),
-          SHANOIR_ALLOWED_ADMIN_IPS: envValue(this.props.allowedAdminIps!.join(",")),
-        },
-      });
+      this.keycloakService = this.deployKeycloak();
     }
 
     //////////// dcm4chee ////////////
-
-    const dcm4cheeDbVariables = {
-      POSTGRES_DB:       envValue(this.props.postgresqlDatabases!["dcm4chee"]!.db),
-      POSTGRES_USER:     envValue(this.props.postgresqlDatabases!["dcm4chee"]!.username),
-      POSTGRES_PASSWORD: this.secretEnvValue("dcm4chee"),
-    };
-
-    this.ldapService = this.createService("dcm4chee-ldap", [389], {
-      image: "dcm4che/slapd-dcm4chee:2.6.2-27.0",
-      volumeMounts: [
-        { path: "/var/lib/openldap/openldap-data", volume: this.volumes["dcm4chee-ldap-data"] },
-        { path: "/etc/openldap/slapd.d", volume: this.volumes["dcm4chee-sldap-data"] },
-      ],
-      envVariables: {
-        STORAGE_DIR: envValue("/storage/fs1"),
-      },
-    });
-
     if (useInternalPostgresqlDatabases) {
-      this.postgresqlService = this.createService("dcm4chee-database", [5432], {
+      this.postgresqlService = this.createDeployment(this, "dcm4chee-database", [5432], { containers: [{
         image: "dcm4che/postgres-dcm4chee:14.4-27",
         volumeMounts: [
           { path: "/var/lib/postgresql/data", volume: this.volumes["dcm4chee-database-data"] },
         ],
-        envVariables: dcm4cheeDbVariables,
-      });
+        envVariables: this.dcm4cheeDbEnvVariables,
+      }]});
     }
 
-    const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
-    this.dcm4cheeService = this.createService("dcm4chee-arc", [8081], {
-      image: "dcm4che/dcm4chee-arc-psql:5.27.0",
-      volumeMounts: [
-        { path: "/opt/wildfly/standalone", volume: this.volumes["dcm4chee-arc-wildfly-data"] },
-        { path: "/storage", volume: this.volumes["dcm4chee-arc-storage-data"] },
-      ],
-      envVariables: {
-        ...dcm4cheeDbVariables,
-        LDAP_URL: envValue(`ldap://${this.ldapService.resourceName}:389`),
-        POSTGRES_HOST: envValue(dcm4cheeDb.host),
-        POSTGRES_PORT: envValue(dcm4cheeDb.port!.toString()),
-        WILDFLY_CHOWN: envValue("/storage"),
-        WILDFLY_WAIT_FOR: envValue(
-          `${this.ldapService.resourceName}:389 ${dcm4cheeDb.host}:${dcm4cheeDb.port}`)
-    }});
+    this.dcm4cheeService = this.deployDcm4chee();
 
     // create a DNS alias "dcm4chee-arc" pointing to the actual dcm4chee service
     //
@@ -256,74 +182,14 @@ export class ShanoirNGChart extends Chart
     });
 
     //////////// shanoir micro services ////////////
+    this.shanoirService = this.deployShanoir();
 
-    this.usersService = this.createShanoirMicroservice("users", [9901], true, {
-      envVariables: {
-        ...this.keycloakCredentialsEnvVariables,
-        ...this.smtpEnvVariables,
-        "VIP_SERVICE_EMAIL": envValue(props.vip!.serviceEmail),
-      }
-    });
-
-    this.studiesService = this.createShanoirMicroservice("studies", [9902], true, {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/studies-data", volume: this.volumes["studies-data"] },
-        // This is related to participants.tsv file
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
-
-    this.importService = this.createShanoirMicroservice("import", [9903], true, {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-      ],
-    });
-
-    this.datasetsService = this.createShanoirMicroservice("datasets", [9904], true, {
-      envVariables: {
-        SHANOIR_SOLR_HOST: envValue(this.solrService.resourceName!),
-        ...this.vipEnvVariables,
-        VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
-      },
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
-
-    this.preclinicalService = this.createShanoirMicroservice("preclinical", [9905], true, {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/extra-data", volume: this.volumes["extra-data"] },
-      ],
-    });
-
-    this.createShanoirMicroservice("nifti-conversion", undefined, false, {
-      extraVolumeMounts: [
-        { path: "/tmp", volume: this.volumes["tmp"] },
-        { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
-      ],
-    });
 
     //////////// front ////////////
 
-    this.createService("nginx", [80, 443], {
-      image: this.shanoirImage("nginx"),
-      volumeMounts: [
-        { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
-      ],
-      envFrom: [ new EnvFrom(this.commonConfigMap)],
-      envVariables: {
-        ...this.vipEnvVariables,
-        SHANOIR_KEYCLOAK_HOST: envValue(this.keycloakService!.resourceName!),
-        SHANOIR_USERS_HOST: envValue(this.usersService.resourceName!),
-        SHANOIR_STUDIES_HOST: envValue(this.studiesService.resourceName!),
-        SHANOIR_IMPORT_HOST: envValue(this.importService.resourceName!),
-        SHANOIR_DATASETS_HOST: envValue(this.datasetsService.resourceName!),
-        SHANOIR_PRECLINICAL_HOST: envValue(this.preclinicalService.resourceName!),
-      },
-    });
+    if (!this.props.init) {
+      this.nginxService = this.deployNginx();
+    }
   }
 
   /** generate the OCI image name for a given shanoir service */
@@ -340,7 +206,9 @@ export class ShanoirNGChart extends Chart
   mysqlDatabase(name: string): ShanoirDatabaseProps {
     const db = this.props.mysqlDatabases![name]!;
     return {...db,
-      host: ((db.host!="INTERNAL") ? db.host : this.mysqlService!.resourceName!),
+      host: ((db.host != "INTERNAL") ? db.host : 
+             (name == "keycloak") ? this.keycloakMysqlService!.resourceName! :
+             this.mysqlService!.resourceName!),
       port: db.port ?? 3306,
     };
   }
@@ -398,7 +266,6 @@ export class ShanoirNGChart extends Chart
     assert(this.url.pathname == "/");
     assert(this.viewerUrl.port == "")
     assert(this.viewerUrl.pathname == "/")
-
 
     return new ConfigMap(this, "common-cm", { data: {
       SHANOIR_PREFIX: "",
@@ -465,72 +332,13 @@ export class ShanoirNGChart extends Chart
     };
   }
 
-  /** common generic function for creating a deployment + an associated service
-   *
-   * @param name   name of the service
-   * @param ports  list of TCP ports included in the service
-   * @param props  properties of the deployed container
-   * @return       the created service (if `ports` is defined) or undefined (if `ports` is
-   *               undefined)
-   */
-  private createService<P extends number[]|undefined>(name: string, ports: P, props: ContainerProps):
-    OptService<P>
+  private createDcm4cheeDbEnvVariables(): { [key: string]: EnvValue }
   {
-    const deploy = new Deployment(this, `${name}-deploy`, {
-      replicas: 1,
-      strategy: DeploymentStrategy.recreate(),
-      containers: [props],
-    });
-
-    if (typeof ports === "undefined") {
-      return undefined as OptService<P>;
-    } else {
-      assert(ports.length);
-      return new Service(this, `${name}-svc`, {
-        ports: ports.map((p) => ({port: p})),
-        selector: deploy
-      }) as OptService<P>;
-    }
-  }
-
-  /** common generic function for creating a shanoir microservice deployment+service
-   *
-   * This function does the same as {@link createService}, but with additional common settings
-   *  - set container image
-   *  - use the {@link commonConfigMap}
-   *  - add the rabbitmq and database config
-   *  - mount the `logs` volume)
-   */
-  private createShanoirMicroservice<P extends number[]|undefined>(
-    name: string, ports: P, hasDatabase: boolean, props: {
-      envVariables?: { [key: string]: EnvValue },
-      extraVolumeMounts?: VolumeMount[],
-  }): OptService<P>
-  {
-    let dbVariables = {};
-    if (hasDatabase) {
-      const db = this.mysqlDatabase(name);
-      dbVariables = {
-        "SHANOIR_DB_HOST": envValue(db.host),
-        "SHANOIR_DB_PORT": envValue(db.port!.toString()),
-        "SHANOIR_DB_NAME": envValue(db.db),
-        "spring.datasource.username": envValue(db.username),
-        "spring.datasource.password": this.secretEnvValue(name),
-      };
-    }
-
-    return this.createService(name, ports, {
-        image: this.shanoirImage(name),
-        envFrom: [ new EnvFrom(this.commonConfigMap), ],
-        envVariables: {
-          "spring.rabbitmq.host": envValue(this.rabbitmqService.resourceName!),
-          ...dbVariables,
-          ...props.envVariables ?? {}},
-        volumeMounts: [
-          { path: "/var/log/shanoir-ng-logs", volume: this.volumes["logs"]! },
-          ...(props.extraVolumeMounts ?? [])
-        ],
-    });
+    return{
+      POSTGRES_DB:       envValue(this.props.postgresqlDatabases!["dcm4chee"]!.db),
+      POSTGRES_USER:     envValue(this.props.postgresqlDatabases!["dcm4chee"]!.username),
+      POSTGRES_PASSWORD: this.secretEnvValue("dcm4chee"),
+    };
   }
 
   /** Add uid/gid parameters to a security context
@@ -606,6 +414,240 @@ export class ShanoirNGChart extends Chart
       ...props,
       securityContext: this.securityContext(name, props.securityContext),
     });
+  }
+
+  private deployRabbitmq(): Service
+  {
+    return this.createDeployment(this, "rabbitmq", [5672], { containers: [{
+      image: "rabbitmq:3.10.7",
+      volumeMounts: [
+        { path: "/var/lib/rabbitmq/mnesia", volume: this.volumes["rabbitmq-data"] },
+      ],
+    }]});
+  }
+
+  private deployMysqlDatabase(name: "database"|"keycloak-database"): Service
+  {
+      let opt = (name == "keycloak-database")
+        ? {
+          volumeName: "keycloak-database-data",
+          extraEnv: {MYSQL_DATABASE: envValue("keycloak")},
+          extraArgs: []
+        } : {
+          volumeName: "database-data",
+          extraEnv: {} as {[key: string]: EnvValue},
+          extraArgs: [ "--max_allowed_packet", "20000000"],
+        };
+
+      return this.createDeployment(this, name, [3306], { 
+        containers: [{
+          image: this.shanoirImage(name),
+          args: [
+            // Fix k8s and old mysql
+            // https://stackoverflow.com/questions/37644118/initializing-mysql-directory-error
+            "--ignore-db-dir=lost+found",
+            ...opt.extraArgs,
+          ],
+          envVariables: {
+            "MYSQL_ROOT_PASSWORD": envValue("password"),
+            ...opt.extraEnv,
+          },
+          volumeMounts: [
+            { path: "/var/lib/mysql",       volume: this.volumes[opt.volumeName] },
+          ],
+        }],
+      });
+  }
+
+  private deployKeycloak(): Service
+  {
+    const db = this.mysqlDatabase("keycloak")!;
+
+    let self = this;
+    function kcContainer(migration: string): ContainerProps {
+      return {
+        image: self.shanoirImage("keycloak"),
+        envFrom: [new EnvFrom(self.commonConfigMap)],
+        envVariables: {
+          ...self.keycloakCredentialsEnvVariables,
+          ...self.smtpEnvVariables,
+          KC_DB_URL_HOST: envValue(db.host),
+          KC_DB_URL_PORT: envValue(db.port!.toString()),
+          KC_DB_URL_DATABASE: envValue(db.db),
+          KC_DB_USERNAME: envValue(db.username),
+          KC_DB_PASSWORD: self.secretEnvValue("keycloak"),
+          SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
+          SHANOIR_MIGRATION: envValue(migration),
+          
+        },
+      }
+    }
+
+      return this.createDeployment(this.initChart!, "keycloak", [8080], {
+        initContainers: [kcContainer("init")],
+        // run keycloak normally after initialisation (needed by the 'users' container)
+        containers: [kcContainer("never")],
+      });
+  }
+
+  private deploySolr(): Service
+  {
+    return this.createDeployment(this, "solr", [8983], { containers: [{
+      image: this.shanoirImage("solr"),
+      envVariables: {
+        SOLR_LOG_LEVEL: envValue("SEVERE"),
+      },
+      volumeMounts: [
+        { path: "/var/solr", volume: this.volumes["solr-data"] },
+      ],
+    }]});
+  }
+
+  private deployDcm4chee(): Service
+  {
+    const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
+
+    return this.createDeployment(this, "dcm4chee", [8081], {
+      // ldap sidecar container
+      initContainers: [{
+        name: "ldap",
+        restartPolicy: ContainerRestartPolicy.ALWAYS,
+        image: "dcm4che/slapd-dcm4chee:2.6.2-27.0",
+        volumeMounts: [
+          { path: "/var/lib/openldap/openldap-data", volume: this.volumes["dcm4chee-ldap-data"] },
+          { path: "/etc/openldap/slapd.d", volume: this.volumes["dcm4chee-sldap-data"] },
+        ],
+        envVariables: {
+          STORAGE_DIR: envValue("/storage/fs1"),
+        },
+      }],
+      // dcm4chee-arc app container
+      containers: [{
+        name: "dcm4chee-arc",
+        image: "dcm4che/dcm4chee-arc-psql:5.27.0",
+        volumeMounts: [
+          { path: "/opt/wildfly/standalone", volume: this.volumes["dcm4chee-arc-wildfly-data"] },
+          { path: "/storage", volume: this.volumes["dcm4chee-arc-storage-data"] },
+        ],
+        envVariables: {
+          ...this.dcm4cheeDbEnvVariables,
+          LDAP_URL: envValue(`ldap://127.0.0.1:389`),
+          POSTGRES_HOST: envValue(dcm4cheeDb.host),
+          POSTGRES_PORT: envValue(dcm4cheeDb.port!.toString()),
+          WILDFLY_CHOWN: envValue("/storage"),
+          WILDFLY_WAIT_FOR: envValue(`127.0.0.1:389 ${dcm4cheeDb.host}:${dcm4cheeDb.port}`),
+        },
+      }],
+    });
+  }
+
+  private deployShanoir(): Service | undefined
+  {
+    let self=this;
+    function shanoirContainer(name: string, hasDatabase: boolean,
+                              props: {
+                                envVariables?: { [key: string]: EnvValue },
+                                extraVolumeMounts?: VolumeMount[],
+                              }): ContainerProps
+    {
+      let dbVariables = {};
+      if (hasDatabase) {
+        const db = self.mysqlDatabase(name);
+        dbVariables = {
+          "SHANOIR_DB_HOST": envValue(db.host),
+          "SHANOIR_DB_PORT": envValue(db.port!.toString()),
+          "SHANOIR_DB_NAME": envValue(db.db),
+          "spring.datasource.username": envValue(db.username),
+          "spring.datasource.password": self.secretEnvValue(name),
+        };
+      }
+
+      return {
+          name: name,
+          image: self.shanoirImage(name),
+          envFrom: [ new EnvFrom(self.commonConfigMap), ],
+          envVariables: {
+            "spring.rabbitmq.host": envValue(self.rabbitmqService.resourceName!),
+            ...dbVariables,
+            ...props.envVariables ?? {}},
+          volumeMounts: [
+            // NOTE: currently the studies, import, datasets, preclinical and nifti-conversion
+            //       containers must share the same "/tmp" volume
+            { path: "/tmp",                     volume: self.volumes["tmp"] },
+            { path: "/var/log/shanoir-ng-logs", volume: self.volumes["logs"]! },
+            ...(props.extraVolumeMounts ?? [])
+          ],
+          securityContext: self.securityContext("shanoir", {}),
+      };
+    }
+
+    let shanoirProps = {
+      containers: [
+        shanoirContainer("users", true, {
+          envVariables: {
+            ...this.keycloakCredentialsEnvVariables,
+            ...this.smtpEnvVariables,
+            "VIP_SERVICE_EMAIL": envValue(this.props.vip!.serviceEmail),
+          },
+        }),
+        shanoirContainer("studies", true, {
+          extraVolumeMounts: [
+            { path: "/var/studies-data", volume: this.volumes["studies-data"]! },
+            // This is related to participants.tsv file
+            { path: "/var/datasets-data", volume: this.volumes["datasets-data"]! },
+          ],
+        }),
+
+        shanoirContainer("import", true, {}),
+
+        shanoirContainer("datasets", true, {
+          envVariables: {
+            SHANOIR_SOLR_HOST: envValue(this.solrService.resourceName!),
+            ...this.vipEnvVariables,
+            VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
+          },
+          extraVolumeMounts: [
+            { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
+          ],
+        }),
+
+        shanoirContainer("preclinical", true, {
+          extraVolumeMounts: [
+            { path: "/var/extra-data", volume: this.volumes["extra-data"] },
+          ],
+        }),
+    ]};
+
+      this.createDeployment(this, "nifti-conversion", undefined, { containers: [
+        shanoirContainer("nifti-conversion", false, {
+          extraVolumeMounts: [
+            { path: "/var/datasets-data", volume: this.volumes["datasets-data"]! },
+          ],
+        }),
+      ]});
+
+      return this.createDeployment(this, "shanoir", [9901, 9902, 9903, 9904, 9905], shanoirProps);
+  }
+
+  private deployNginx(): Service
+  {
+    return this.createDeployment(this, "nginx", [80], { containers: [{
+      image: this.shanoirImage("nginx"),
+      volumeMounts: [
+        { path: "/var/log/nginx", volume: this.volumes["logs"], subPath: "nginx" },
+      ],
+      envFrom: [ new EnvFrom(this.commonConfigMap)],
+      envVariables: {
+        ...this.vipEnvVariables,
+        // FIXME: will fail if using an external keycloak server
+        SHANOIR_KEYCLOAK_HOST: envValue(this.keycloakService!.resourceName!),
+        SHANOIR_USERS_HOST: envValue(this.shanoirService!.resourceName!),
+        SHANOIR_STUDIES_HOST: envValue(this.shanoirService!.resourceName!),
+        SHANOIR_IMPORT_HOST: envValue(this.shanoirService!.resourceName!),
+        SHANOIR_DATASETS_HOST: envValue(this.shanoirService!.resourceName!),
+        SHANOIR_PRECLINICAL_HOST: envValue(this.shanoirService!.resourceName!),
+      },
+    }]});
   }
 
 }

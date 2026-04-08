@@ -132,9 +132,15 @@ function defaultPostgresqlDatabases(): {[key: string]: ShanoirDatabaseProps}
     }};
 }
 
-
 export const defaultUids = {
+  "database": 510,
+  "rabbitmq": 511,
+  "shanoir":  512,
+  "keycloak-database": 513,
+  "solr": 514,
+  "keycloak": 1000,
 }
+
 
 /** Default values for {@link ShanoirNGProps} */
 export const shanoirNGDefaults = {
