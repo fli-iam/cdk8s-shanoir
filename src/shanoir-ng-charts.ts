@@ -85,6 +85,7 @@ export class ShanoirNGChart extends Chart
     console.error("orig props:", props);
 
     assert(props.keycloakUrl == undefined); // not yet supported
+    assert(!(props.keycloakInternalUrl != undefined && props.keycloakUrl == undefined));
 
     // ensure all volume claims and db credentials are provided 
     checkResourceMap("volume claim", props.volumeClaimProps, shanoirVolumes);
@@ -101,6 +102,8 @@ export class ShanoirNGChart extends Chart
     // (after this line, all keys of `props`, `props.smtp` and `props.vip` are defined)
     props = {
       namespace: id,
+      keycloakUrl: `${props.url}/auth`,
+      keycloakInternalUrl: props.keycloakUrl,
       ...shanoirNGDefaults, ...props,
       smtp: {...shanoirSmtpDefaults, ...props.smtp },
       vip:  {...shanoirVipDefaults,  ...props.vip },
@@ -196,10 +199,11 @@ export class ShanoirNGChart extends Chart
     return `${this.props.dockerRepository}/${service}:${this.props.version}`;
   }
 
-  /** get the url of the keycloak service */
-  keycloakUrl(): string
+  /** get the internal url of the keycloak service */
+  keycloakInternalUrl(): string
   {
-    return this.props.keycloakUrl ??  `http://${this.keycloakService!.resourceName!}:8080/auth`;
+    return this.props.keycloakInternalUrl ??
+      `http://${this.keycloakService!.resourceName!}:8080/auth`;
   }
 
   /** get the actual parameters for a given mysql database
@@ -277,6 +281,7 @@ export class ShanoirNGChart extends Chart
       SHANOIR_URL_HOST: this.url.host,
       SHANOIR_VIEWER_OHIF_URL_SCHEME: this.viewerUrl.protocol.replace(/:$/, ""),
       SHANOIR_VIEWER_OHIF_URL_HOST: this.viewerUrl.host,
+      SHANOIR_KEYCLOAK_URL: this.props.keycloakUrl!,
 
       SHANOIR_ADMIN_EMAIL: this.props.adminEmail,
       SHANOIR_ADMIN_NAME: this.props.adminName,
@@ -620,10 +625,8 @@ export class ShanoirNGChart extends Chart
           envFrom: [ new EnvFrom(self.commonConfigMap), ],
           envVariables: {
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
+            SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.keycloakInternalUrl()),
             "spring.rabbitmq.host": envValue(self.rabbitmqService.resourceName!),
-            "spring.security.oauth2.resourceserver.jwt.issuer-uri":
-              envValue(`${self.keycloakUrl()}/realms/shanoir-ng`),
-
             ...dbVariables,
             ...props.envVariables ?? {}},
           volumeMounts: [

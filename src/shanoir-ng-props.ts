@@ -243,9 +243,18 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Url of the keycloak server (if external)
   *
-  * If unset, this deployment will include a keycloak container reachable at `${this.url}/auth/`
+  * If undefined, this deployment will include a keycloak container reachable at `${this.url}/auth/`
   */
   readonly keycloakUrl?: string;
+
+  /** Internal url of the keycloak server
+   *
+   * This parameter may contain an alternate URL to reach the keycloak server from the shanoir
+   * microservices. It must not be set if {@link keycloakUrl} is undefined.
+   *
+   * If undefined, the deployment will use the same value as {@link keycloakUrl}.
+   */
+  readonly keycloakInternalUrl?: string;
 
   /** Keycloak account (master realm) for managing users */
   readonly keycloakCredentials: ShanoirCredentials;
