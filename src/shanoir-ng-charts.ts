@@ -111,7 +111,7 @@ export class ShanoirNGChart extends Chart
     this.props = props;
 
     if (props.init) {
-      this.initChart = new Chart(scope, `danger-${id}-init`, props);
+      this.initChart = new Chart(scope, `danger-init-${id}`, props);
     }
 
     //////////// namespace ////////////
