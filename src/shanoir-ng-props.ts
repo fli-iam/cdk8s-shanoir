@@ -96,10 +96,8 @@ export const shanoirMysqlDatabases = [
   "import",
   "keycloak",
   "migrations",
-  "mysql",
   "preclinical",
   "studies",
-  "sys",
   "users",
 ];
 
