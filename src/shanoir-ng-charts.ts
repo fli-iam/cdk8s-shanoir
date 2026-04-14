@@ -11,7 +11,7 @@ import {
 
 import {
   ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases,
-  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
+  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirRequiredVolumes,
 } from "./shanoir-ng-props";
 
 //TODO: allocate resources (see #11)
@@ -88,7 +88,7 @@ export class ShanoirNGChart extends Chart
     assert(!(props.keycloakInternalUrl != undefined && props.keycloakUrl == undefined));
 
     // ensure all volume claims and db credentials are provided 
-    checkResourceMap("volume claim", props.volumeClaimProps, shanoirVolumes);
+    checkResourceMap("volume claim", props.volumeClaimProps, shanoirRequiredVolumes);
     checkResourceMap("mysql database", props.mysqlDatabases, shanoirMysqlDatabases);
     checkResourceMap("postgresql database", props.postgresqlDatabases, shanoirPostgresqlDatabases);
 
@@ -167,14 +167,7 @@ export class ShanoirNGChart extends Chart
 
     //////////// dcm4chee ////////////
     if (useInternalPostgresqlDatabases) {
-      this.postgresqlService = this.createDeployment(this, "dcm4chee-database", [5432], { containers: [{
-        image: "dcm4che/postgres-dcm4chee:14.4-27",
-        ...noResources,
-        volumeMounts: [
-          { path: "/var/lib/postgresql/data", volume: this.volumes["dcm4chee-database-data"] },
-        ],
-        envVariables: this.dcm4cheeDbEnvVariables,
-      }]});
+      this.postgresqlService = this.deployDcm4cheeDatabase();
     }
 
     this.dcm4cheeService = this.deployDcm4chee();
@@ -357,7 +350,7 @@ export class ShanoirNGChart extends Chart
    */
   private securityContext(name: string, props?: PodSecurityContextProps): PodSecurityContextProps
   {
-    const uid = this.props.uids![name];
+    const uid = this.props.uids![name]!;
     return {
         user: uid,
         group: uid,
@@ -539,9 +532,35 @@ export class ShanoirNGChart extends Chart
     }]});
   }
 
+  private deployDcm4cheeDatabase(): Service
+  {
+    let tmp = Volume.fromEmptyDir(this, `dcm4chee-database-tmp`, "tmp", { sizeLimit: Size.mebibytes(1) });
+
+    return this.createDeployment(this, "dcm4chee-database", [5432], { containers: [{
+      image: "dcm4che/postgres-dcm4chee:14.4-27",
+      ...noResources,
+      volumeMounts: [
+        { path: "/var/lib/postgresql/data", volume: this.volumes["dcm4chee-database-data"] },
+        { path: "/var/run/postgresql", volume:tmp, subPath: "run" },
+        { path: "/tmp", volume:tmp, subPath: "tmp" },
+      ],
+      envVariables: this.dcm4cheeDbEnvVariables,
+      securityContext: {
+        // postgresql requires to be started as root because it chowns its datadir at startup
+        // the server runs as uid 999
+        ensureNonRoot: false,
+      },
+    }]});
+  }
+
   private deployDcm4chee(): Service
   {
     const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
+    let self = this;
+    function optVolume(name: string, sizeMb: number): Volume {
+      return self.volumes[name]
+        ?? Volume.fromEmptyDir(self, name, name, {sizeLimit: Size.mebibytes(sizeMb)});
+    }
 
     let service = this.createDeployment(this, "dcm4chee", [8081], {
       // ldap sidecar container
@@ -551,11 +570,17 @@ export class ShanoirNGChart extends Chart
         image: "dcm4che/slapd-dcm4chee:2.6.2-27.0",
         ...noResources,
         volumeMounts: [
-          { path: "/var/lib/openldap/openldap-data", volume: this.volumes["dcm4chee-ldap-data"] },
-          { path: "/etc/openldap/slapd.d", volume: this.volumes["dcm4chee-sldap-data"] },
+          { path: "/var/lib/openldap/openldap-data", volume: optVolume("dcm4chee-ldap-data", 4) },
+          { path: "/etc/openldap/slapd.d", volume: optVolume("dcm4chee-sldap-data", 4) },
         ],
         envVariables: {
           STORAGE_DIR: envValue("/storage/fs1"),
+        },
+        securityContext: {
+          // slapd requires being started as root, with the rootfs in read-write mode because it
+          // modifies the /etc/passwd on startup, ldap is run as uid 1021
+          ensureNonRoot: false,
+          readOnlyRootFilesystem: false,
         },
       }],
       // dcm4chee-arc app container
@@ -564,16 +589,23 @@ export class ShanoirNGChart extends Chart
         image: "dcm4che/dcm4chee-arc-psql:5.27.0",
         ...noResources,
         volumeMounts: [
-          { path: "/opt/wildfly/standalone", volume: this.volumes["dcm4chee-arc-wildfly-data"] },
           { path: "/storage", volume: this.volumes["dcm4chee-arc-storage-data"] },
+          { path: "/opt/wildfly/standalone", volume: optVolume("dcm4chee-arc-wildfly-data", 64) },
+          { path: "/opt/wildfly/standalone/log", volume: this.volumes["dcm4chee-logs"] },
         ],
         envVariables: {
           ...this.dcm4cheeDbEnvVariables,
           LDAP_URL: envValue(`ldap://127.0.0.1:389`),
           POSTGRES_HOST: envValue(dcm4cheeDb.host),
           POSTGRES_PORT: envValue(dcm4cheeDb.port!.toString()),
-          WILDFLY_CHOWN: envValue("/storage"),
+          WILDFLY_CHOWN: envValue("/storage /opt/wildfly/standalone/log"),
           WILDFLY_WAIT_FOR: envValue(`127.0.0.1:389 ${dcm4cheeDb.host}:${dcm4cheeDb.port}`),
+        },
+        securityContext: {
+          // dcm4chee requires being started as root, because it chowns multiple diretories on
+          // startup, wildfly runs as uid 1023
+          ensureNonRoot: false,
+          readOnlyRootFilesystem: false,
         },
       }],
     });
