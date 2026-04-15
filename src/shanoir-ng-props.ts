@@ -218,6 +218,7 @@ export interface ShanoirIngressProps {
   readonly exposeKeycloakAdminConsole?: boolean; 
 };
 
+/** Configuration of a shanoir instance */
 export interface ShanoirNGProps extends ChartProps {
 
   /** Version of shanoir to be deployed (tag of the OCI images)
@@ -246,7 +247,7 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Name of the OCI repository providing the shanoir images
    *
-   * @default see {@link shanoirNGPropsDefaults}
+   * @default see {@link shanoirNGDefaults}
    */
   readonly dockerRepository?: string;
 
@@ -320,7 +321,7 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Create the kubernetes namespace
    *
-   * @default see {@link shanoirNGPropsDefaults}
+   * @default see {@link shanoirNGDefaults}
    */
   readonly createNamespace?: boolean;
 
@@ -332,7 +333,7 @@ export interface ShanoirNGProps extends ChartProps {
    * created by {@link ShanoirNGChart.createDeployment()} and {@link ShanoirNGChart.createJob}.
    * The hashmap keys are the values provided for the 'name' arguments of these function.
    *
-   * @default see {@link shanoirNGPropsDefaults}
+   * @default see {@link shanoirNGDefaults}
    */
   readonly uids?: {[key:string]: number};
 
