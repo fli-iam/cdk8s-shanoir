@@ -11,27 +11,32 @@ import {
 
 import {
   ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases,
-  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirRequiredVolumes,
+  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
 } from "./shanoir-ng-props";
 
 //TODO: allocate resources (see #11)
 const noResources = { resources: {} };
 
-/** ensure that the `map` contains all keys listed in `expect`
+/** ensure that the `map` contains a set of expected keys
  *
- * - raise an exception if a key is missing
- * - show a warning if an extra key is present
+ * If `map` is defined, then the function will:
+ * - raise an exception if any key listed in `requiredKeys` is missing
+ * - show a warning if the map includes a key not listed in `allKeys`
+ *
+ * If `knownKeys` is unset, then it is initialised with the value of `requiredKeys`.
  */
-function checkResourceMap(desc: string, map: {[key: string]: unknown} | undefined, expect: string[])
+function checkResourceMap(desc: string, map: {[key: string]: unknown} | undefined,
+                          requiredKeys: string[], knownKeys?: string[])
 {
   if (map != undefined) {
     const actualSet = new Set(Object.keys(map));
-    const expectSet = new Set(expect);
-    const unknown = [...actualSet].filter(x => !expectSet.has(x));
+    const requiredSet = new Set(requiredKeys);
+    const knownSet = new Set(knownKeys ?? requiredKeys);
+    const unknown = [...actualSet].filter(x => !knownSet.has(x));
     if (unknown.length) {
-      console.error(`warning: unknown ${desc}: ${unknown}`)
+      console.error(`warning: unexpected ${desc}: ${unknown}`)
     }
-    const missing = [...expectSet].filter(x => !actualSet.has(x));
+    const missing = [...requiredSet].filter(x => !actualSet.has(x));
     if (missing.length) {
       throw `error: missing ${desc}: ${missing}`;
     }
@@ -86,20 +91,33 @@ export class ShanoirNGChart extends Chart
     console.error("orig props:", props);
 
     assert(props.keycloakUrl == undefined); // not yet supported
+
+    // keycloakInternalUrl cannot be used if keycloakUrl is unset
     assert(!(props.keycloakInternalUrl != undefined && props.keycloakUrl == undefined));
 
     // must provide a smtp relay
     assert((props.smtp.host != undefined) || (props.smtp.mailpit != undefined));
 
-    // ensure all volume claims and db credentials are provided 
-    checkResourceMap("volume claim", props.volumeClaimProps, shanoirRequiredVolumes);
-    checkResourceMap("mysql database", props.mysqlDatabases, shanoirMysqlDatabases);
-    checkResourceMap("postgresql database", props.postgresqlDatabases, shanoirPostgresqlDatabases);
-
     // optional features
     const useInternalKeycloak            = props.keycloakUrl == undefined;
     const useInternalMysqlDatabases      = props.mysqlDatabases == undefined;
     const useInternalPostgresqlDatabases = props.postgresqlDatabases == undefined;
+
+    // list of volumes for which we do not need a volume claim
+    const optionalVolumes = new Set([
+      "dcm4chee-arc-wildfly-data",
+      "dcm4chee-ldap-data",
+      "dcm4chee-sldap-data",
+      ...(useInternalKeycloak             ? [] : ["keycloak-database-data"]),
+      ...(useInternalMysqlDatabases       ? [] : ["keycloak-database-data", "database-data"]),
+      ...(useInternalPostgresqlDatabases  ? [] : ["dcm4chee-database-data"]),
+    ])
+
+    // ensure all required volume claims and db credentials are provided 
+    checkResourceMap("volume claim", props.volumeClaims,
+                     shanoirVolumes.filter(x => !optionalVolumes.has(x)), shanoirVolumes);
+    checkResourceMap("mysql database", props.mysqlDatabases, shanoirMysqlDatabases);
+    checkResourceMap("postgresql database", props.postgresqlDatabases, shanoirPostgresqlDatabases);
 
 
     // apply the defaults
@@ -130,7 +148,7 @@ export class ShanoirNGChart extends Chart
     //////////// volumes ////////////
 
     // prepare the volume configs to be used in the containers
-    this.volumeClaims = Object.fromEntries(Object.entries(this.props.volumeClaimProps).map(
+    this.volumeClaims = Object.fromEntries(Object.entries(this.props.volumeClaims).map(
       ([name, props]) => [name, new PersistentVolumeClaim(this, `${name}-pvc`, props)]));
 
     this.volumes = Object.fromEntries(Object.entries(this.volumeClaims).map(
@@ -236,7 +254,7 @@ export class ShanoirNGChart extends Chart
 
   createVolumeClaims(): {[key: string]: IPersistentVolumeClaim}
   {
-    return Object.fromEntries(Object.entries(this.props.volumeClaimProps).map(
+    return Object.fromEntries(Object.entries(this.props.volumeClaims).map(
       ([name, props]) => [name, new PersistentVolumeClaim(this, `${name}-pvc`, props)]
     ));
   }
