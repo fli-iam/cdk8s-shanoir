@@ -180,10 +180,9 @@ export class ShanoirNGChart extends Chart
 
     if (!this.props.init) {
       this.nginxService = this.deployNginx();
-
-      this.createIngress();
-
     }
+
+    this.createIngress();
   }
 
   /** generate the OCI image name for a given shanoir service */
@@ -775,7 +774,7 @@ export class ShanoirNGChart extends Chart
   {
     let ingress = this.props.ingress;
     let tls = undefined;
-    let keycloakRules = undefined;
+    let rules = [];
 
     if (ingress.tlsCrt && ingress.tlsKey) {
       tls = [{
@@ -786,15 +785,18 @@ export class ShanoirNGChart extends Chart
         }})}];
     }
 
-    if (this.keycloakService != undefined && ingress.exposeKeycloakAdminConsole) { 
-      let keycloakBackend = IngressBackend.fromService(this.keycloakService);
-      keycloakRules = [
-        { host: this.url.host, path: "/auth/admin/", backend: keycloakBackend},
-        { host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend},
-      ];
+    if (this.nginxService != undefined) {
+      let nginxBackend = IngressBackend.fromService(this.nginxService!);
+      rules.push({ host: this.url.host, backend: nginxBackend });
+      rules.push({ host: this.viewerUrl.host, backend: nginxBackend });
     }
 
-    let nginxBackend = IngressBackend.fromService(this.nginxService!);
+    if (this.keycloakService != undefined && ingress.exposeKeycloakAdminConsole) { 
+      let keycloakBackend = IngressBackend.fromService(this.keycloakService);
+      rules.push({ host: this.url.host, path: "/auth/admin/", backend: keycloakBackend});
+      rules.push({ host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend});
+    }
+
 
     return new Ingress(this, "ing", {
       className: ingress.className,
@@ -806,11 +808,7 @@ export class ShanoirNGChart extends Chart
         },
       },
       tls: tls,
-      rules: [
-        { host: this.url.host, backend: nginxBackend },
-        { host: this.viewerUrl.host, backend: nginxBackend },
-        ...(keycloakRules ?? [])
-      ],
+      rules: rules,
     });
 }
 }
