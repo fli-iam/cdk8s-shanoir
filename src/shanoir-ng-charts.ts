@@ -88,7 +88,7 @@ export class ShanoirNGChart extends Chart
 
   constructor(scope: Construct, id: string, props: ShanoirNGProps)
   {
-    console.error("orig props:", props);
+    //console.error("orig props:", props);
 
     assert(props.keycloakUrl == undefined); // not yet supported
 
@@ -130,7 +130,7 @@ export class ShanoirNGChart extends Chart
       smtp: {...shanoirSmtpDefaults, ...props.smtp },
       vip:  {...shanoirVipDefaults,  ...props.vip },
     };
-    console.error("compiled props:", props);
+    //console.error("compiled props:", props);
 
     super(scope, id, props);
     this.props = props;
