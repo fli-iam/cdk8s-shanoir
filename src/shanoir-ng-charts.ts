@@ -61,6 +61,7 @@ export class ShanoirNGChart extends Chart
 
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
+  readonly mailpitService?: Service;
   readonly dcm4cheeService: Service;
   readonly keycloakService?: Service;
   readonly keycloakMysqlService?: Service;
@@ -86,6 +87,9 @@ export class ShanoirNGChart extends Chart
 
     assert(props.keycloakUrl == undefined); // not yet supported
     assert(!(props.keycloakInternalUrl != undefined && props.keycloakUrl == undefined));
+
+    // must provide a smtp relay
+    assert((props.smtp.host != undefined) || (props.smtp.mailpit != undefined));
 
     // ensure all volume claims and db credentials are provided 
     checkResourceMap("volume claim", props.volumeClaimProps, shanoirRequiredVolumes);
@@ -141,10 +145,14 @@ export class ShanoirNGChart extends Chart
     this.commonConfigMap = this.createCommonConfigMap();
 
     this.secret = this.createSecret();
-    this.smtpEnvVariables = this.createSmtpEnvVariables();
     this.vipEnvVariables = this.createVipEnvVariables();
     this.keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
     this.dcm4cheeDbEnvVariables = this.createDcm4cheeDbEnvVariables();
+
+    if (props.smtp.mailpit != undefined) {
+      this.mailpitService = this.deployMailpit();
+    }
+    this.smtpEnvVariables = this.createSmtpEnvVariables();
 
     //////////// backend services ////////////
 
@@ -250,7 +258,7 @@ export class ShanoirNGChart extends Chart
 
       "keycloak-admin": this.props.keycloakCredentials.password,
       "vip-client-secret": this.props.vip!.clientSecret,
-      "smtp": this.props.smtp.auth?.password ?? "",
+      "smtp": this.props.smtp.auth?.password ?? "-",
     }});
   }
 
@@ -300,16 +308,34 @@ export class ShanoirNGChart extends Chart
   /** smtp environment variables needed for outgoing mail */
   private createSmtpEnvVariables(): { [key: string]: EnvValue }
   {
-    return {
-      SHANOIR_SMTP_HOST: envValue(this.props.smtp.host),
-      SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
-      SHANOIR_SMTP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
-      SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? ""),
-      SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
-      SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
+    const commonVars = {
       SHANOIR_SMTP_FROM: envValue(this.props.smtp.fromAddress),
-      SHANOIR_SMTP_PASSWORD: this.secretEnvValue("smtp"),
     };
+
+    if (this.props.smtp.host == undefined) {
+      // development setup: use the mailpit service
+      return {
+        SHANOIR_SMTP_HOST: envValue(this.mailpitService!.resourceName!),
+        SHANOIR_SMTP_PORT: envValue("1025"),
+        SHANOIR_SMTP_AUTH: envValue("false"),
+        SHANOIR_SMTP_USERNAME: envValue("-"),
+        SHANOIR_SMTP_PASSWORD: envValue("-"),
+        SHANOIR_SMTP_STARTTLS_ENABLE: envValue("false"),
+        ...commonVars
+      };
+    } else {
+      // normal setup: use an external SMTP relay
+      return {
+        SHANOIR_SMTP_HOST: envValue(this.props.smtp.host),
+        SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
+        SHANOIR_SMTP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
+        SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? "-"),
+        SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
+        SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
+        SHANOIR_SMTP_PASSWORD: this.secretEnvValue("smtp"),
+        ...commonVars
+      };
+    }
   }
 
   private createVipEnvVariables(): { [key: string]: EnvValue }
@@ -417,6 +443,16 @@ export class ShanoirNGChart extends Chart
     });
   }
 
+  private deployMailpit(): Service
+  {
+    return this.createDeployment(this, "mailpit", [1025, 8025], {
+      containers: [{
+        image: "axllent/mailpit",
+        securityContext: { readOnlyRootFilesystem: false },
+      }]
+    });
+  }
+
   private deployRabbitmq(): Service
   {
     return this.createDeployment(this, "rabbitmq", [5672], { containers: [{
@@ -486,6 +522,7 @@ export class ShanoirNGChart extends Chart
           KC_DB_URL_DATABASE: envValue(db.db),
           KC_DB_USERNAME: envValue(db.username),
           KC_DB_PASSWORD: self.secretEnvValue("keycloak"),
+          KC_HOSTNAME_DEBUG: envValue("true"),
           SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
           SHANOIR_MIGRATION: envValue(migration),
           
@@ -797,6 +834,10 @@ export class ShanoirNGChart extends Chart
       rules.push({ host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend});
     }
 
+    if (this.props.smtp.mailpit?.host != undefined) {
+      rules.push({ host: this.props.smtp.mailpit!.host!,
+                   backend: IngressBackend.fromService(this.mailpitService!, { port: 8025 })});
+    }
 
     return new Ingress(this, "ing", {
       className: ingress.className,

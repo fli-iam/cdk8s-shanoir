@@ -25,8 +25,11 @@ export const shanoirSmtpDefaults = {
 /** SMTP configuration for outgoing mails */
 export interface ShanoirSmtpProps {
 
-  /** relay hostname/ip */
-  readonly host: string;
+  /** relay hostname/ip
+   *
+   * Leave it empty when using the mailpit service (see {@link mailpit})
+   */
+  readonly host?: string;
 
   /** relay TCP port
    *
@@ -46,8 +49,29 @@ export interface ShanoirSmtpProps {
    */
   readonly starttls?: "disabled" | "optional" | "required";
 
+  /** Configuration of the Mailpit service
+   *
+   * If set, this deployment will include a Mailpit SMTP server for catching outgoing emails.
+   * It will be used when {@link ShanoirSmtpProps.host} is undefined.
+   *
+   * Mailpit is a dummy SMTP server for testing purpose. DO NOT USE IT IN PRODUCTION.
+   * https://mailpit.axllent.org/
+   */
+  readonly mailpit?: ShanoirMailpitProps;
+
   /** default sender address */
   readonly fromAddress: string;
+}
+
+/** Configuration of the Mailpit service */
+export interface ShanoirMailpitProps {
+  /** Ingress host name
+   *
+   * If set, the shanoir ingress will include a rule to expose the Mailpit Web UI at this hostname.
+   *
+   * Note: the UI is unauthenticated. DO NOT EXPOSE IT TO THE INTERNET.
+   */
+  readonly host?: string;
 }
 
 /** Default values for {@link ShanoirVipProps} */
@@ -145,6 +169,7 @@ export const defaultUids = {
   "shanoir":  512,
   "keycloak-database": 513,
   "solr": 514,
+  "mailpit": 600,
   "keycloak": 1000,
   // Note: the dcm4chee images do not support running as an arbitary user, they must be run as
   // root and switch to an hardcoded uid at startup:
