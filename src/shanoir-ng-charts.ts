@@ -559,6 +559,7 @@ export class ShanoirNGChart extends Chart
           KC_HOSTNAME_DEBUG: envValue("true"),
           SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
           SHANOIR_MIGRATION: envValue(migration),
+          SHANOIR_USERS_HOST: envValue(self.serviceName("ms", true)),
         },
         volumeMounts: [
           { path: "/tmp", volume: tmp },
