@@ -865,10 +865,15 @@ export class ShanoirNGChart extends Chart
           // FIXME: shanoir should never return a http: url
           "nginx.ingress.kubernetes.io/proxy-redirect-from": `http://${this.url.host}`,
           "nginx.ingress.kubernetes.io/proxy-redirect-to":  `https://${this.url.host}`,
+          // FIXME: this parameter should apply only to the endpoints which actually need it
+          //        (eg: /shanoir-ng/import/importer/upload_dicom/)
+          // FIXME: the nginx and datasets container have a similar parameter in their config
+          //        -> we should have a key in this.props to configure all three at once
+          "nginx.ingress.kubernetes.io/proxy-body-size": "5g",
         },
       },
       tls: tls,
       rules: rules,
     });
-}
+  }
 }
