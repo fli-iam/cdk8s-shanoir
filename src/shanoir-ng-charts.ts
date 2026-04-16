@@ -616,7 +616,7 @@ export class ShanoirNGChart extends Chart
         ?? Volume.fromEmptyDir(self, name, name, {sizeLimit: Size.mebibytes(sizeMb)});
     }
 
-    let service = this.createDeployment(this, "dcm4chee", [8081], {
+    let service = this.createDeployment(this, "dcm4chee", [8081, 11112], {
       // ldap sidecar container
       initContainers: [{
         name: "ldap",
@@ -649,6 +649,7 @@ export class ShanoirNGChart extends Chart
         ],
         envVariables: {
           ...this.dcm4cheeDbEnvVariables,
+          HTTP_PORT: envValue("8081"),
           LDAP_URL: envValue(`ldap://127.0.0.1:389`),
           POSTGRES_HOST: envValue(dcm4cheeDb.host),
           POSTGRES_PORT: envValue(dcm4cheeDb.port!.toString()),
@@ -671,7 +672,7 @@ export class ShanoirNGChart extends Chart
     // table (useful when snapshotting an instance).
     new Service(this, `dcm4chee-cname`, {
       metadata: { name: "dcm4chee-arc" },
-      externalName: service.resourceName,
+      externalName: `${service.resourceName}.${self.props.namespace}.svc.cluster.local`,
     });
 
     return service;
