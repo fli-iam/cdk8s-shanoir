@@ -48,8 +48,6 @@ function envValue(value: string): EnvValue {
   return EnvValue.fromValue(value);
 }
 
-type OptService<T> = T extends undefined ? undefined : Service;
-
 export class ShanoirNGChart extends Chart
 {
   readonly props: ShanoirNGProps;
@@ -64,18 +62,9 @@ export class ShanoirNGChart extends Chart
   readonly keycloakCredentialsEnvVariables: {[key: string]: EnvValue};
   readonly dcm4cheeDbEnvVariables: {[key: string]: EnvValue};
 
+  readonly services: {[key: string]: Service};
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
-  readonly mailpitService?: Service;
-  readonly dcm4cheeService: Service;
-  readonly keycloakService?: Service;
-  readonly keycloakMysqlService?: Service;
-  readonly mysqlService?: Service;
-  readonly nginxService?: Service;
-  readonly postgresqlService?: Service;
-  readonly rabbitmqService: Service;
-  readonly shanoirService?: Service;
-  readonly solrService: Service;
 
   /** Additional chart for initialising a new shanoir instance from scratch
    *
@@ -134,6 +123,7 @@ export class ShanoirNGChart extends Chart
 
     super(scope, id, props);
     this.props = props;
+    this.services = {};
 
     if (props.init) {
       this.initChart = new Chart(scope, `danger-init-${id}`, props);
@@ -166,46 +156,49 @@ export class ShanoirNGChart extends Chart
     this.vipEnvVariables = this.createVipEnvVariables();
     this.keycloakCredentialsEnvVariables = this.createKeycloakCredentialsEnvVariables();
     this.dcm4cheeDbEnvVariables = this.createDcm4cheeDbEnvVariables();
+    this.smtpEnvVariables = this.createSmtpEnvVariables();
+
+    //////////// smtp service ////////////
 
     if (props.smtp.mailpit != undefined) {
-      this.mailpitService = this.deployMailpit();
+      this.deployMailpit();
     }
-    this.smtpEnvVariables = this.createSmtpEnvVariables();
 
     //////////// backend services ////////////
 
     if (useInternalMysqlDatabases) {
       // deploy an internal mysql container
-      this.mysqlService = this.deployMysqlDatabase("database");
+      this.deployMysqlDatabase("database");
 
       if (useInternalKeycloak) {
-        this.keycloakMysqlService = this.deployMysqlDatabase("keycloak-database");
+        this.deployMysqlDatabase("keycloak-database");
       }
     }
 
-    this.rabbitmqService = this.deployRabbitmq();
+    this.deployRabbitmq();
 
-    this.solrService = this.deploySolr();
+    this.deploySolr();
 
     if (useInternalKeycloak) {
-      this.keycloakService = this.deployKeycloak();
+      this.deployKeycloak();
     }
 
     //////////// dcm4chee ////////////
+
     if (useInternalPostgresqlDatabases) {
-      this.postgresqlService = this.deployDcm4cheeDatabase();
+      this.deployDcm4cheeDatabase();
     }
 
-    this.dcm4cheeService = this.deployDcm4chee();
+    this.deployDcm4chee();
 
     //////////// shanoir micro services ////////////
-    this.shanoirService = this.deployShanoir();
 
+    this.deployShanoir();
 
     //////////// front ////////////
 
     if (!this.props.init) {
-      this.nginxService = this.deployNginx();
+      this.deployNginx();
     }
 
     this.createIngress();
@@ -217,37 +210,62 @@ export class ShanoirNGChart extends Chart
     return `${this.props.dockerRepository}/${service}:${this.props.version}`;
   }
 
+  /** get or create a service
+   * 
+   * This function allows lazily creating a service before its associated deployment is created.
+   * This is needed to allow cross-references between.
+   */
+  getOrCreateService(name: string): Service
+  {
+    let svc = this.services[name];
+    if (svc == undefined) {
+      svc = this.services[name] = new Service(this, `${name}-svc`)
+    }
+    return svc
+  }
+
+  /** get the actual name of a service (i.e. the name of the api object)
+   *
+   * When `lazy` is unset, the function will fail if the service does not pre-exist in
+   * `this.services` (otherwise it is lazily created).
+   */
+  serviceName(name: string, lazy?: boolean): string 
+  {
+    let svc = lazy ? this.getOrCreateService(name) : this.services[name]!;
+    return svc.resourceName!;
+  }
+
   /** get the internal url of the keycloak service */
   keycloakInternalUrl(): string
   {
     return this.props.keycloakInternalUrl ??
-      `http://${this.keycloakService!.resourceName!}:8080/auth`;
+      `http://${this.serviceName("keycloak")}:8080/auth`;
   }
 
   /** get the actual parameters for a given mysql database
    *
-   * - resolve `host` to this.mysqlService when using the internal database service
+   * - resolve `host` to the internal database service if used
    * - set default `port` value
    */
   mysqlDatabase(name: string): ShanoirDatabaseProps {
     const db = this.props.mysqlDatabases![name]!;
     return {...db,
       host: ((db.host != "INTERNAL") ? db.host : 
-             (name == "keycloak") ? this.keycloakMysqlService!.resourceName! :
-             this.mysqlService!.resourceName!),
+             (name == "keycloak") ? this.serviceName("keycloak-database") :
+             this.serviceName("database")),
       port: db.port ?? 3306,
     };
   }
 
   /** get the actual parameters for a given postgresql database
    *
-   * - resolve `host` to this.postgreqlService when using the internal database service
+   * - resolve `host` to the internal database service if used
    * - set default `port` value
    */
   postgresqlDatabase(name: string): ShanoirDatabaseProps {
     const db = this.props.postgresqlDatabases![name]!;
     return {...db,
-      host: ((db.host!="INTERNAL") ? db.host : this.postgresqlService!.resourceName!),
+      host: ((db.host!="INTERNAL") ? db.host : this.serviceName("dcm4chee-database")),
       port: db.port ?? 5432,
     };
   }
@@ -333,7 +351,7 @@ export class ShanoirNGChart extends Chart
     if (this.props.smtp.host == undefined) {
       // development setup: use the mailpit service
       return {
-        SHANOIR_SMTP_HOST: envValue(this.mailpitService!.resourceName!),
+        SHANOIR_SMTP_HOST: envValue(this.serviceName("mailpit", true)),
         SHANOIR_SMTP_PORT: envValue("1025"),
         SHANOIR_SMTP_AUTH: envValue("false"),
         SHANOIR_SMTP_USERNAME: envValue("-"),
@@ -416,13 +434,14 @@ export class ShanoirNGChart extends Chart
    * @param ports  list of TCP ports included in the service
    * @param props  deployment properties (with 'replicas: 1' and 'strategy: "Recreate"' by
    *               default)
-   * @return       the created service (if `ports` is defined) or undefined (if `ports` is
-   *               undefined)
    *
    * 'props.securityContext' is processed through {@link this.securityContext}.
+   *
+   * The service is created only if `ports` is not empty and it is created with
+   * {@link getOrCreateService} so that it can be referenced by prior objects.
    */
-  private createDeployment<P extends number[]|undefined>(scope: Chart, name: string, ports: P, props: DeploymentProps):
-    OptService<P>
+  private createDeployment(scope: Chart, name: string, ports: number[],
+                           props: DeploymentProps): Deployment
   {
     const deploy = new Deployment(scope, `${name}-deploy`, {
       replicas: 1,
@@ -431,15 +450,12 @@ export class ShanoirNGChart extends Chart
       securityContext: this.securityContext(name, props.securityContext),
     });
 
-    if (typeof ports === "undefined") {
-      return undefined as OptService<P>;
-    } else {
-      assert(ports.length);
-      return new Service(scope, `${name}-svc`, {
-        ports: ports.map((p) => ({port: p, name: p.toString()})),
-        selector: deploy
-      }) as OptService<P>;
+    if (ports.length) {
+      let svc = this.getOrCreateService(name);
+      svc.select(deploy);
+      ports.forEach((p) => svc.bind(p, {name: p.toString()}));
     }
+    return deploy
   }
 
   /** common generic function for creating a job
@@ -461,7 +477,7 @@ export class ShanoirNGChart extends Chart
     });
   }
 
-  private deployMailpit(): Service
+  private deployMailpit(): Deployment
   {
     return this.createDeployment(this, "mailpit", [1025, 8025], {
       containers: [{
@@ -471,7 +487,7 @@ export class ShanoirNGChart extends Chart
     });
   }
 
-  private deployRabbitmq(): Service
+  private deployRabbitmq(): Deployment
   {
     return this.createDeployment(this, "rabbitmq", [5672], { containers: [{
       image: "rabbitmq:3.10.7",
@@ -483,7 +499,7 @@ export class ShanoirNGChart extends Chart
     }]});
   }
 
-  private deployMysqlDatabase(name: "database"|"keycloak-database"): Service
+  private deployMysqlDatabase(name: "database"|"keycloak-database"): Deployment
   {
       let opt = (name == "keycloak-database")
         ? {
@@ -521,7 +537,7 @@ export class ShanoirNGChart extends Chart
       });
   }
 
-  private deployKeycloak(): Service
+  private deployKeycloak(): Deployment
   {
     const db = this.mysqlDatabase("keycloak")!;
     let tmp = Volume.fromEmptyDir(this, "keycloak-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
@@ -543,7 +559,6 @@ export class ShanoirNGChart extends Chart
           KC_HOSTNAME_DEBUG: envValue("true"),
           SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
           SHANOIR_MIGRATION: envValue(migration),
-          
         },
         volumeMounts: [
           { path: "/tmp", volume: tmp },
@@ -569,7 +584,7 @@ export class ShanoirNGChart extends Chart
     }
   }
 
-  private deploySolr(): Service
+  private deploySolr(): Deployment
   {
     let tmp = Volume.fromEmptyDir(this, "solr-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
 
@@ -586,7 +601,7 @@ export class ShanoirNGChart extends Chart
     }]});
   }
 
-  private deployDcm4cheeDatabase(): Service
+  private deployDcm4cheeDatabase(): Deployment
   {
     let tmp = Volume.fromEmptyDir(this, `dcm4chee-database-tmp`, "tmp", { sizeLimit: Size.mebibytes(1) });
 
@@ -607,7 +622,7 @@ export class ShanoirNGChart extends Chart
     }]});
   }
 
-  private deployDcm4chee(): Service
+  private deployDcm4chee(): Deployment
   {
     const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
     let self = this;
@@ -616,7 +631,7 @@ export class ShanoirNGChart extends Chart
         ?? Volume.fromEmptyDir(self, name, name, {sizeLimit: Size.mebibytes(sizeMb)});
     }
 
-    let service = this.createDeployment(this, "dcm4chee", [8081, 11112], {
+    let deploy = this.createDeployment(this, "dcm4chee", [8081, 11112], {
       // ldap sidecar container
       initContainers: [{
         name: "ldap",
@@ -672,13 +687,13 @@ export class ShanoirNGChart extends Chart
     // table (useful when snapshotting an instance).
     new Service(this, `dcm4chee-cname`, {
       metadata: { name: "dcm4chee-arc" },
-      externalName: `${service.resourceName}.${self.props.namespace}.svc.cluster.local`,
+      externalName: `${this.serviceName("dcm4chee")}.${self.props.namespace}.svc.cluster.local`,
     });
 
-    return service;
+    return deploy;
   }
 
-  private deployShanoir(): Service | undefined
+  private deployShanoir(): Deployment | undefined
   {
     const migrationsDb = this.mysqlDatabase("migrations");
     // TODO: https://github.com/fli-iam/shanoir-ng/issues/3430
@@ -713,7 +728,7 @@ export class ShanoirNGChart extends Chart
           envVariables: {
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
             SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.keycloakInternalUrl()),
-            "spring.rabbitmq.host": envValue(self.rabbitmqService.resourceName!),
+            "spring.rabbitmq.host": envValue(self.serviceName("rabbitmq")),
             ...dbVariables,
             ...props.envVariables ?? {}},
           volumeMounts: [
@@ -745,7 +760,7 @@ export class ShanoirNGChart extends Chart
             ...this.keycloakCredentialsEnvVariables,
             ...this.smtpEnvVariables,
             "kc.admin.client.server.url": envValue(
-              `http://${this.keycloakService!.resourceName}:8080/auth`),
+              `http://${this.serviceName("keycloak")}:8080/auth`),
             "VIP_SERVICE_EMAIL": envValue(this.props.vip!.serviceEmail),
           },
         }),
@@ -761,7 +776,7 @@ export class ShanoirNGChart extends Chart
 
         shanoirContainer("datasets", true, {
           envVariables: {
-            SHANOIR_SOLR_HOST: envValue(this.solrService.resourceName!),
+            SHANOIR_SOLR_HOST: envValue(this.serviceName("solr")),
             ...this.vipEnvVariables,
             VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
           },
@@ -783,11 +798,13 @@ export class ShanoirNGChart extends Chart
         ...shanoirProps,
         restartPolicy: RestartPolicy.NEVER,
       });
+      // bind a dummy port to the service (to avoid an exception due to lazy creation)
+      this.services["ms"]!.bind(9900, { name: "dummy"})
       return undefined;
 
     } else {
       // normal mode
-      this.createDeployment(this, "nifti-conversion", undefined, { containers: [
+      this.createDeployment(this, "nifti-conversion", [], { containers: [
         shanoirContainer("nifti-conversion", false, {
           extraVolumeMounts: [
             { path: "/var/datasets-data", volume: this.volumes["datasets-data"]! },
@@ -799,7 +816,7 @@ export class ShanoirNGChart extends Chart
     }
   }
 
-  private deployNginx(): Service
+  private deployNginx(): Deployment
   {
     return this.createDeployment(this, "nginx", [80], { containers: [{
       image: this.shanoirImage("nginx"),
@@ -811,12 +828,12 @@ export class ShanoirNGChart extends Chart
       envVariables: {
         ...this.vipEnvVariables,
         // FIXME: will fail if using an external keycloak server
-        SHANOIR_KEYCLOAK_HOST: envValue(this.keycloakService!.resourceName!),
-        SHANOIR_USERS_HOST: envValue(this.shanoirService!.resourceName!),
-        SHANOIR_STUDIES_HOST: envValue(this.shanoirService!.resourceName!),
-        SHANOIR_IMPORT_HOST: envValue(this.shanoirService!.resourceName!),
-        SHANOIR_DATASETS_HOST: envValue(this.shanoirService!.resourceName!),
-        SHANOIR_PRECLINICAL_HOST: envValue(this.shanoirService!.resourceName!),
+        SHANOIR_KEYCLOAK_HOST: envValue(this.serviceName("keycloak")),
+        SHANOIR_USERS_HOST: envValue(this.serviceName("shanoir")),
+        SHANOIR_STUDIES_HOST: envValue(this.serviceName("shanoir")),
+        SHANOIR_IMPORT_HOST: envValue(this.serviceName("shanoir")),
+        SHANOIR_DATASETS_HOST: envValue(this.serviceName("shanoir")),
+        SHANOIR_PRECLINICAL_HOST: envValue(this.serviceName("shanoir")),
       },
       // FIXME: should not run as root
       securityContext: {
@@ -841,21 +858,21 @@ export class ShanoirNGChart extends Chart
         }})}];
     }
 
-    if (this.nginxService != undefined) {
-      let nginxBackend = IngressBackend.fromService(this.nginxService!);
+    if (this.services["nginx"] != undefined) {
+      let nginxBackend = IngressBackend.fromService(this.services["nginx"]!);
       rules.push({ host: this.url.host, backend: nginxBackend });
       rules.push({ host: this.viewerUrl.host, backend: nginxBackend });
     }
 
-    if (this.keycloakService != undefined && ingress.exposeKeycloakAdminConsole) { 
-      let keycloakBackend = IngressBackend.fromService(this.keycloakService);
+    if (this.services["keycloak"] != undefined && ingress.exposeKeycloakAdminConsole) { 
+      let keycloakBackend = IngressBackend.fromService(this.services["keycloak"]!);
       rules.push({ host: this.url.host, path: "/auth/admin/", backend: keycloakBackend});
       rules.push({ host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend});
     }
 
     if (this.props.smtp.mailpit?.host != undefined) {
       rules.push({ host: this.props.smtp.mailpit!.host!,
-                   backend: IngressBackend.fromService(this.mailpitService!, { port: 8025 })});
+                   backend: IngressBackend.fromService(this.services["mailpit"]!, { port: 8025 })});
     }
 
     return new Ingress(this, "ing", {
