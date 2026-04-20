@@ -870,6 +870,7 @@ export class ShanoirNGChart extends Chart
       let keycloakBackend = IngressBackend.fromService(this.services["keycloak"]!);
       rules.push({ host: this.url.host, path: "/auth/admin/", backend: keycloakBackend});
       rules.push({ host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend});
+      rules.push({ host: this.url.host, path: "/auth/resources/", backend: keycloakBackend});
     }
 
     if (this.props.smtp.mailpit?.host != undefined) {
