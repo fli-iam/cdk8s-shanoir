@@ -193,7 +193,7 @@ export class ShanoirNGChart extends Chart
 
     //////////// shanoir micro services ////////////
 
-    this.deployShanoir();
+    this.deployMicroservices();
 
     //////////// front ////////////
 
@@ -694,7 +694,8 @@ export class ShanoirNGChart extends Chart
     return deploy;
   }
 
-  private deployShanoir(): Deployment | undefined
+  /** Deploy the shanoir microservices */
+  private deployMicroservices(): Deployment | undefined
   {
     const migrationsDb = this.mysqlDatabase("migrations");
     // TODO: https://github.com/fli-iam/shanoir-ng/issues/3430
@@ -739,7 +740,7 @@ export class ShanoirNGChart extends Chart
             { path: "/var/log/shanoir-ng-logs", volume: self.volumes["logs"]! },
             ...(props.extraVolumeMounts ?? [])
           ],
-          securityContext: self.securityContext("shanoir", {}),
+          securityContext: self.securityContext("ms", {}),
       };
     }
 
@@ -795,7 +796,7 @@ export class ShanoirNGChart extends Chart
 
     if (this.props.init!) {
       // initialisation mode
-      this.createJob(this.initChart!, "shanoir", {
+      this.createJob(this.initChart!, "ms", {
         ...shanoirProps,
         restartPolicy: RestartPolicy.NEVER,
       });
@@ -813,7 +814,7 @@ export class ShanoirNGChart extends Chart
         }),
       ]});
 
-      return this.createDeployment(this, "shanoir", [9901, 9902, 9903, 9904, 9905], shanoirProps);
+      return this.createDeployment(this, "ms", [9901, 9902, 9903, 9904, 9905], shanoirProps);
     }
   }
 
@@ -830,11 +831,11 @@ export class ShanoirNGChart extends Chart
         ...this.vipEnvVariables,
         // FIXME: will fail if using an external keycloak server
         SHANOIR_KEYCLOAK_HOST: envValue(this.serviceName("keycloak")),
-        SHANOIR_USERS_HOST: envValue(this.serviceName("shanoir")),
-        SHANOIR_STUDIES_HOST: envValue(this.serviceName("shanoir")),
-        SHANOIR_IMPORT_HOST: envValue(this.serviceName("shanoir")),
-        SHANOIR_DATASETS_HOST: envValue(this.serviceName("shanoir")),
-        SHANOIR_PRECLINICAL_HOST: envValue(this.serviceName("shanoir")),
+        SHANOIR_USERS_HOST: envValue(this.serviceName("ms")),
+        SHANOIR_STUDIES_HOST: envValue(this.serviceName("ms")),
+        SHANOIR_IMPORT_HOST: envValue(this.serviceName("ms")),
+        SHANOIR_DATASETS_HOST: envValue(this.serviceName("ms")),
+        SHANOIR_PRECLINICAL_HOST: envValue(this.serviceName("ms")),
       },
       // FIXME: should not run as root
       securityContext: {
