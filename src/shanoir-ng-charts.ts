@@ -733,6 +733,7 @@ export class ShanoirNGChart extends Chart
           envVariables: {
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
             SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.keycloakInternalUrl()),
+            SHANOIR_STORAGE_TYPE: envValue("file-system"),
             "spring.rabbitmq.host": envValue(self.serviceName("rabbitmq")),
             ...dbVariables,
             ...props.envVariables ?? {}},
