@@ -10,8 +10,9 @@ import {
 } from "cdk8s-plus-33"; import { URL } from "whatwg-url";
 
 import {
-  ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults, shanoirMysqlDatabases,
-  shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults, shanoirVolumes,
+  defaultDockerRepository, ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults,
+  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults,
+  shanoirVolumes,
 } from "./shanoir-ng-props";
 
 //TODO: allocate resources (see #11)
@@ -113,6 +114,7 @@ export class ShanoirNGChart extends Chart
     // (after this line, all keys of `props`, `props.smtp` and `props.vip` are defined)
     props = {
       namespace: id,
+      dockerRepository: defaultDockerRepository(props.version ?? shanoirNGDefaults.version),
       keycloakUrl: `${props.url}/auth`,
       keycloakInternalUrl: props.keycloakUrl,
       ...shanoirNGDefaults, ...props,

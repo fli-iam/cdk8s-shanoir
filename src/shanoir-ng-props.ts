@@ -178,10 +178,9 @@ export const defaultUids = {
 
 /** Default values for {@link ShanoirNGProps} */
 export const shanoirNGDefaults = {
-  version: "NG_v2.10.0",
+  version: "develop",
   instanceName: "",
   instanceColor: "",
-  dockerRepository: "ghcr.io/fli-iam/shanoir-ng",
   allowedAdminIps: [],
   smtp: shanoirSmtpDefaults,
   vip: shanoirVipDefaults,
@@ -191,6 +190,17 @@ export const shanoirNGDefaults = {
   uids: defaultUids,
   init: false,
 };
+
+/** get the official repository for a given version
+ *
+ * Releases are hosted on the official 'shanoir-ng` repository and development versions (named
+ * `develop` or a git commit id) are hosted in a side repository (`shanoir-deploy`).
+ */
+export function defaultDockerRepository(version: string): string
+{
+  return /^(develop|[0-9a-f]{40})$/.test(version) ? "ghcr.io/fli-iam/shanoir-deploy"
+                                                  : "ghcr.io/fli-iam/shanoir-ng";
+}
 
 export interface ShanoirIngressProps {
   /** Ingress class */
@@ -248,7 +258,9 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Name of the OCI repository providing the shanoir images
    *
-   * @default see {@link shanoirNGDefaults}
+   * If unset, the images will be pulled from the official shanoir repository.
+   *
+   * @default see {@link defaultDockerRepository}
    */
   readonly dockerRepository?: string;
 
