@@ -793,7 +793,7 @@ export class ShanoirNGChart extends Chart
 
         shanoirContainer("preclinical", true, {
           extraVolumeMounts: [
-            { path: "/var/extra-data", volume: this.volumes["extra-data"] },
+            { path: "/var/preclinical-data", volume: this.volumes["preclinical-data"] },
           ],
         }),
     ]};

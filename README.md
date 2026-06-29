@@ -72,7 +72,7 @@ new ShanoirNGChart(app, 'shanoir-example',
     // medical data
     "datasets-data":              pvc(64),
     "dcm4chee-arc-storage-data":  pvc(512),
-    "extra-data":                 pvc(1),
+    "preclinical-data":           pvc(1),
     "studies-data":               pvc(2),
 
     // databases

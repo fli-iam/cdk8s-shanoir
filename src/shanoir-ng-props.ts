@@ -93,7 +93,7 @@ export const shanoirVolumes = [
   // medical data
   "datasets-data",
   "dcm4chee-arc-storage-data",
-  "extra-data",
+  "preclinical-data",
   "studies-data",
 
   // databases
