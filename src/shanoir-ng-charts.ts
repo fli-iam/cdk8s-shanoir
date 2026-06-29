@@ -506,7 +506,7 @@ export class ShanoirNGChart extends Chart
       let opt = (name == "keycloak-database")
         ? {
           volumeName: "keycloak-database-data",
-          extraEnv: {MYSQL_DATABASE: envValue("keycloak")},
+          extraEnv: {MARIADB_DATABASE: envValue("keycloak")},
           extraArgs: []
         } : {
           volumeName: "database-data",
@@ -526,7 +526,8 @@ export class ShanoirNGChart extends Chart
             ...opt.extraArgs,
           ],
           envVariables: {
-            "MYSQL_ROOT_PASSWORD": envValue("password"),
+            MARIADB_ROOT_PASSWORD: envValue("password"),
+            MARIADB_AUTO_UPGRADE: envValue("1"),
             ...opt.extraEnv,
           },
           volumeMounts: [
@@ -753,7 +754,7 @@ export class ShanoirNGChart extends Chart
           ...noResources,
           envVariables: {
             // TODO: support db/port/username/password
-            MYSQL_HOST: envValue(migrationsDb.host),
+            MARIADB_HOST: envValue(migrationsDb.host),
             SHANOIR_MIGRATION: envValue(this.props.init! ? "init" : "manual"),
           },
         }
