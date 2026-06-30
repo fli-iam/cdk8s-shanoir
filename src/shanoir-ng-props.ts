@@ -232,6 +232,20 @@ export interface ShanoirIngressProps {
   readonly exposeKeycloakAdminConsole?: boolean; 
 };
 
+/** Default values for {@link ShanoirViewerMaxNumRequestsProps} */
+export const shanoirViewerMaxNumRequestsDefaults = {
+  interaction: 40,
+  thumbnail: 20,
+  prefetch: 20,
+}
+
+export interface ShanoirViewerMaxNumRequestsProps
+{
+  readonly interaction?: number,
+  readonly thumbnail?: number,
+  readonly prefetch?: number,
+}
+
 /** Configuration of a shanoir instance */
 export interface ShanoirNGProps extends ChartProps {
 
@@ -246,6 +260,15 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Url of the OHIF viewer */
   readonly viewerUrl: string;
+
+  /** Set the maximum number of concurrent requests sent by the OHIF viewer
+   *
+   * see `maxNumRequests`
+   * in https://docs.ohif.org/configuration/configurationFiles#configuration-options
+   *
+   * @default see {@link shanoirViewerMaxNumRequestsDefaults}
+   */
+  readonly viewerMaxNumRequests?: ShanoirViewerMaxNumRequestsProps;
 
   /** Name of this shanoir instance (displayed in the side panel) */
   readonly instanceName?: string;

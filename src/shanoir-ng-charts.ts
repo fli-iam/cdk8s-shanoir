@@ -11,8 +11,8 @@ import {
 
 import {
   defaultDockerRepository, ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults,
-  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults, shanoirVipDefaults,
-  shanoirVolumes,
+  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults,
+  shanoirViewerMaxNumRequestsDefaults, shanoirVipDefaults, shanoirVolumes,
 } from "./shanoir-ng-props";
 
 //TODO: allocate resources (see #11)
@@ -119,6 +119,7 @@ export class ShanoirNGChart extends Chart
       keycloakInternalUrl: props.keycloakUrl,
       ...shanoirNGDefaults, ...props,
       smtp: {...shanoirSmtpDefaults, ...props.smtp },
+      viewerMaxNumRequests: {...shanoirViewerMaxNumRequestsDefaults, ...props.viewerMaxNumRequests},
       vip:  {...shanoirVipDefaults,  ...props.vip },
     };
     //console.error("compiled props:", props);
@@ -858,6 +859,13 @@ export class ShanoirNGChart extends Chart
         SHANOIR_IMPORT_HOST: envValue(this.serviceName("ms")),
         SHANOIR_DATASETS_HOST: envValue(this.serviceName("ms")),
         SHANOIR_PRECLINICAL_HOST: envValue(this.serviceName("ms")),
+
+        SHANOIR_VIEWER_OHIF_INTERACTION_NUM_REQUESTS:
+          envValue(`${this.props.viewerMaxNumRequests!.interaction!}`),
+        SHANOIR_VIEWER_OHIF_THUMBNAIL_NUM_REQUESTS:
+          envValue(`${this.props.viewerMaxNumRequests!.thumbnail!}`),
+        SHANOIR_VIEWER_OHIF_PREFETCH_NUM_REQUESTS:
+          envValue(`${this.props.viewerMaxNumRequests!.prefetch!}`),
       },
       // FIXME: should not run as root
       securityContext: {
