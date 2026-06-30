@@ -773,8 +773,7 @@ export class ShanoirNGChart extends Chart
         shanoirContainer("studies", true, {
           extraVolumeMounts: [
             { path: "/var/studies-data", volume: this.volumes["studies-data"]! },
-            // This is related to participants.tsv file
-            { path: "/var/datasets-data", volume: this.volumes["datasets-data"]! },
+            { path: "/var/bids-data",    volume: this.volumes["bids-data"]! },
           ],
         }),
 
@@ -788,6 +787,7 @@ export class ShanoirNGChart extends Chart
           },
           extraVolumeMounts: [
             { path: "/var/datasets-data", volume: this.volumes["datasets-data"] },
+            { path: "/var/bids-data",     volume: this.volumes["bids-data"]! },
           ],
         }),
 
@@ -813,10 +813,26 @@ export class ShanoirNGChart extends Chart
       this.createDeployment(this, "nifti-conversion", [], { containers: [
         shanoirContainer("nifti-conversion", false, {
           extraVolumeMounts: [
+            { path: "/var/bids-data",     volume: this.volumes["bids-data"]! },
             { path: "/var/datasets-data", volume: this.volumes["datasets-data"]! },
           ],
         }),
       ]});
+      this.createDeployment(this, "bids-validator", [], { containers: [{
+        name: "bids-validator",
+        image: self.shanoirImage("bids-validator"),
+        ...noResources,
+        envVariables : {
+          AMQP_URL:  envValue(`amqp://guest:guest@${self.serviceName("rabbitmq")}:5672/`),
+          IN_QUEUE:  envValue("bids.validate"),
+          OUT_QUEUE: envValue("bids.validated"),
+          DATA_ROOT: envValue("/var/bids-data"),
+        },
+        volumeMounts: [
+          { path: "/var/bids-data", volume: this.volumes["bids-data"]! },
+        ],
+        securityContext: self.securityContext("ms"),
+      }]});
 
       return this.createDeployment(this, "ms", [9901, 9902, 9903, 9904, 9905], shanoirProps);
     }

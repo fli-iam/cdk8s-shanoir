@@ -86,6 +86,7 @@ new ShanoirNGChart(app, 'shanoir-example',
     "keycloak-logs":              pvc(1),
 
     // disposable data (temporary data, indexes, ...)
+    "bids-data":                  pvc(32),
     "rabbitmq-data":              pvc(1),
     "solr-data":                  pvc(1),
     "tmp":                        pvc(32),

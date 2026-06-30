@@ -107,6 +107,7 @@ export const shanoirVolumes = [
   "keycloak-logs",
 
   // disposable data (temporary data, indexes, ...)
+  "bids-data",
   "rabbitmq-data",
   "solr-data",
   "tmp",
