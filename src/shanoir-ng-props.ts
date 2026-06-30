@@ -189,6 +189,8 @@ export const shanoirNGDefaults = {
   mysqlDatabases: defaultMysqlDatabases(),
   postgresqlDatabases: defaultPostgresqlDatabases(),
   uids: defaultUids,
+  shutdownHour: 0,
+  continuanceHour: 0,
   init: false,
 };
 
@@ -350,6 +352,23 @@ export interface ShanoirNGProps extends ChartProps {
    * @default see {@link shanoirNGDefaults}
    */
   readonly uids?: {[key:string]: number};
+
+  /** start time of the daily unavailability period
+   *
+   * This variable, along with {@link continuanceHour}, may be used to indicate a daily time period
+   * when this shanoir instance is not available (eg: for maintainance purpose). Shanoir will avoid
+   * scheduling VIP jobs during that period.
+   *
+   * @example `{shutdownHour: 1, continuanceHour: 2}` means that this shanoir instance may not be
+   * available between 1am and 2am every night
+   */
+  readonly shutdownHour?: number;
+
+  /** end time of the daily unavailability period
+   *
+   * see {@link shutdownHour}
+   */
+  readonly continuanceHour?: number;
 
   /** Flag for initialising a new shanoir instance
    *

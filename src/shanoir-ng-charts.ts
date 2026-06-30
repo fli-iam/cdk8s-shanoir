@@ -781,6 +781,8 @@ export class ShanoirNGChart extends Chart
 
         shanoirContainer("datasets", true, {
           envVariables: {
+            SHANOIR_SHUTDOWN_HOUR:    envValue(`${this.props.shutdownHour}`),
+            SHANOIR_CONTINUANCE_HOUR: envValue(`${this.props.continuanceHour}`),
             SHANOIR_SOLR_HOST: envValue(this.serviceName("solr")),
             ...this.vipEnvVariables,
             VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
