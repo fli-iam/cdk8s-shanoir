@@ -149,67 +149,36 @@ in a separate file `dist/danger-init-shanoir-example.k8s.yaml` to avoid any mish
 
 The manifests **must** be generated with **`init: true`**.
 
-Deploy the main manifests:
+Deploy the manifests:
 ```
-kubectl apply -f dist/shanoir-example.k8s.yaml
+kubectl apply -f dist/shanoir-example.k8s.yaml -f dist/danger-init-shanoir-example.k8s.yaml
 ```
 
-Wait until all deployments are up-to-date:
+Wait until all deployments are up-to-date (this may take a few minutes):
 ```
 $ kubectl get deploy -w
 NAMESPACE        NAME                                      READY  UP-TO-DATE  AVAILABLE  AGE
-shanoir-example  shanoir-example-database-deploy           1/1    1           1          4m37s
-shanoir-example  shanoir-example-dcm4chee-database-deploy  1/1    1           1          4m37s
-shanoir-example  shanoir-example-dcm4chee-deploy           1/1    1           1          4m36s
-shanoir-example  shanoir-example-keycloak-database-deploy  1/1    1           1          4m37s
-shanoir-example  shanoir-example-mailpit-deploy            1/1    1           1          4m37s
-shanoir-example  shanoir-example-rabbitmq-deploy           1/1    1           1          4m37s
-shanoir-example  shanoir-example-solr-deploy               1/1    1           1          4m37s
-```
-
-Deploy the initialisation manifests, this will create a deployment for keycloak and a job for the
-shanoir microservices:
-```
-$ kubectl apply -f dist/danger-init-shanoir-example.k8s.yaml
-```
-
-Wait until the keycloak deployment is ready (this may take a few minutes):
-```
-$ kubectl get pod -w
-NAME                                                           READY   STATUS            RESTARTS   AGE
-danger-init-shanoir-example-keycloak-deploy-647c654b5c-nmcfc   0/1     PodInitializing   0          97s
+NAME                                          READY   UP-TO-DATE   AVAILABLE   AGE
+danger-init-shanoir-example-keycloak-deploy   0/1     1            0           7s
+shanoir-example-database-deploy               1/1     1            1           8s
+shanoir-example-dcm4chee-database-deploy      0/1     1            0           8s
+shanoir-example-dcm4chee-deploy               1/1     1            1           8s
+shanoir-example-keycloak-database-deploy      0/1     1            0           8s
+shanoir-example-mailpit-deploy                1/1     1            1           8s
+shanoir-example-rabbitmq-deploy               1/1     1            1           8s
+shanoir-example-solr-deploy                   1/1     1            1           8s
 ...
-danger-init-shanoir-example-keycloak-deploy-647c654b5c-nmcfc   1/1     Running           0          98s
+shanoir-example-dcm4chee-database-deploy      1/1     1            1           15s
+shanoir-example-keycloak-database-deploy      1/1     1            1           18s
+danger-init-shanoir-example-keycloak-deploy   1/1     1            1           103s
 ```
 
-When it is ready, you may check its output to ensure that it is listening:
-```
-$ kubectl logs danger-init-shanoir-example-keycloak-deploy-f6c4frhh4h
-...
-Keycloak 26.2.1 on JVM (powered by Quarkus 3.20.0) started in 6.129s. Listening on: http://0.0.0.0:8080
-```
 
-As long as issue [#16](https://github.com/fli-iam/cdk8s-shanoir/issues/16) is not fixed, the job for
-initialising the microservices does not correctly run because it needs the keycloak service to be
-available (so as to synchronise the initial users in the *shanoir-ng* realm).
-
-Delete the *ms* job and re-apply the initialisation manifests:
+Wait until the *ms* init job is complete:
 ```
-$ kubectl delete job/danger-init-shanoir-example-ms-job
-job.batch "danger-init-shanoir-example-ms-job" deleted
-
-$ kubectl apply -f dist/danger-init-shanoir-example.k8s.yaml
-deployment.apps/danger-init-shanoir-example-keycloak-deploy-c818faf7 configured
-job.batch/danger-init-shanoir-example-ms-job-c880db34 created
-```
-
-Wait until the job is complete:
-```
-$ kubectl get job -w
-NAME                                 STATUS               COMPLETIONS   DURATION   AGE
-danger-init-shanoir-example-ms-job   Running              0/1           34s        34s
-danger-init-shanoir-example-ms-job   SuccessCriteriaMet   0/1           77s        77s
-danger-init-shanoir-example-ms-job   Complete             1/1           77s        77s
+user@shanoir-dev:~/git/cdk8s-shanoir/sample$ kubectl get job -w 
+NAME                                 STATUS     COMPLETIONS   DURATION   AGE
+danger-init-shanoir-example-ms-job   Complete   1/1           3m1s       3m30s
 ```
 
 Check the output of the containers to ensure there are no errors:

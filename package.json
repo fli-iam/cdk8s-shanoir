@@ -40,11 +40,15 @@
     }
   },
   "bundleDependencies": [
+    "@types/shell-quote",
     "@types/whatwg-url",
+    "shell-quote",
     "whatwg-url"
   ],
   "dependencies": {
+    "@types/shell-quote": "^1.7.5",
     "@types/whatwg-url": "^13.0.0",
+    "shell-quote": "^1.9.0",
     "whatwg-url": "^16.0.0"
   },
   "devDependencies": {

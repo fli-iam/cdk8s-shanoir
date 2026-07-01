@@ -174,6 +174,7 @@ export const defaultUids = {
   // - dcm4chee-database: 999
   // - dcm4chee-ldap: 1021
   // - dcm4chee-arc: 1023
+  "nobody": 65535,
 }
 
 

@@ -7,7 +7,9 @@ import {
   JobProps, Namespace, PersistentVolumeClaim, PodSecurityContextProps, RestartPolicy, Secret,
   Service, Volume, VolumeMount,
 
-} from "cdk8s-plus-33"; import { URL } from "whatwg-url";
+} from "cdk8s-plus-33";
+import { quote } from "shell-quote";
+import { URL } from "whatwg-url";
 
 import {
   defaultDockerRepository, ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults,
@@ -407,6 +409,31 @@ export class ShanoirNGChart extends Chart
     };
   }
 
+  /** Generate a container that waits until multiple TCP servers are responding
+   *
+   * This is intended to be used as an init container when a pod requires these TCP servers to be up
+   * before starting.
+   */
+  private waitTcpServers(servers: {host: string, port: number}[]): ContainerProps
+  {
+    return {
+      name: "wait-tcp-servers",
+      ...noResources,
+      securityContext: this.securityContext("nobody"),
+      image: "busybox",
+      command: ["/bin/sh", "-c", `\
+wait() {
+  echo "\`date\` Waiting until TCP service $1:$2 is ready"
+  while ! nc -w1 -- "$1" "$2" </dev/null >/dev/null ; do
+    sleep 1
+  done
+}
+${servers.map((s) => quote(['wait', s.host, s.port.toString()])).join("\n")}
+echo "\`date\` done"
+`],
+    };
+  }
+
   /** Add uid/gid parameters to a security context
    *
    * The resulting security context is created with the 'user', 'group' and 'fsGroup' initialised
@@ -547,7 +574,7 @@ export class ShanoirNGChart extends Chart
     let tmp = Volume.fromEmptyDir(this, "keycloak-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
 
     let self = this;
-    function kcContainer(migration: string): ContainerProps {
+    function kcContainer(overrideEnv: {[key: string]: EnvValue}): ContainerProps {
       return {
         image: self.shanoirImage("keycloak"),
         ...noResources,
@@ -562,8 +589,9 @@ export class ShanoirNGChart extends Chart
           KC_DB_PASSWORD: self.secretEnvValue("keycloak"),
           KC_HOSTNAME_DEBUG: envValue("true"),
           SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
-          SHANOIR_MIGRATION: envValue(migration),
+          SHANOIR_MIGRATION: envValue("never"),
           SHANOIR_USERS_HOST: envValue(self.serviceName("ms", true)),
+          ...overrideEnv,
         },
         volumeMounts: [
           { path: "/tmp", volume: tmp },
@@ -578,13 +606,18 @@ export class ShanoirNGChart extends Chart
 
     if (this.props.init) {
       return this.createDeployment(this.initChart!, "keycloak", [8080], {
-        initContainers: [kcContainer("init")],
+        // run keycloak in "init" mode (with the http server disabled to avoid detection by the
+        // wait-tcp-servers init-container in the 'ms' deployment)
+        initContainers: [kcContainer({
+          SHANOIR_MIGRATION: envValue("init"),
+          QUARKUS_HTTP_HOST_ENABLED: envValue("false"),
+        })],
         // run keycloak normally after initialisation (needed by the 'users' container)
-        containers: [kcContainer("never")],
+        containers: [kcContainer({})],
       });
     } else {
       return this.createDeployment(this, "keycloak", [8080], {
-      containers: [kcContainer("never")]
+        containers: [kcContainer({})]
       });
     }
   }
@@ -750,7 +783,20 @@ export class ShanoirNGChart extends Chart
     }
 
     let shanoirProps = {
-      initContainers: [ {
+      initContainers: [
+        this.waitTcpServers([
+          { host: this.serviceName("rabbitmq")!, port: 5672 },
+          { host: migrationsDb.host, port: migrationsDb.port! },
+
+          // The datasets container may rebuild the solr index on startup (this happens
+          // automatically when the solr schema is updated or when the solar pvc is cleared)
+          { host: this.serviceName("solr")!, port: 8983 },
+
+          // In 'init' mode the users container synchronises its user db with keycloak
+          // (to populate the keycloak db with the initial users)
+          ...(this.props.init! ? [{host: this.serviceName("keycloak"), port: 8080 }] : []),
+        ]),
+        {
           name: "database-migrations",
           image: this.shanoirImage("database-migrations"),
           ...noResources,
