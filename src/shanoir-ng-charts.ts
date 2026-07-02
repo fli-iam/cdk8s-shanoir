@@ -144,10 +144,10 @@ export class ShanoirNGChart extends Chart
 
     // prepare the volume configs to be used in the containers
     this.volumeClaims = Object.fromEntries(Object.entries(this.props.volumeClaims).map(
-      ([name, props]) => [name, new PersistentVolumeClaim(this, `${name}-pvc`, props)]));
+      ([name, props]) => [name, new PersistentVolumeClaim(this, `pvc-${name}`, props)]));
 
     this.volumes = Object.fromEntries(Object.entries(this.volumeClaims).map(
-      ([name, pvc]) => [name, Volume.fromPersistentVolumeClaim(this, `${name}-rv`, pvc)]));
+      ([name, pvc]) => [name, Volume.fromPersistentVolumeClaim(this, `rv-${name}`, pvc)]));
 
     //////////// env vars ////////////
 
@@ -224,7 +224,7 @@ export class ShanoirNGChart extends Chart
   {
     let svc = this.services[name];
     if (svc == undefined) {
-      svc = this.services[name] = new Service(this, `${name}-svc`)
+      svc = this.services[name] = new Service(this, `svc-${name}`)
     }
     return svc
   }
@@ -316,7 +316,7 @@ export class ShanoirNGChart extends Chart
     assert(this.viewerUrl.port == "")
     assert(this.viewerUrl.pathname == "/")
 
-    return new ConfigMap(this, "common-cm", { data: {
+    return new ConfigMap(this, "cm-common", { data: {
       SHANOIR_PREFIX: "",
       SHANOIR_URL_SCHEME: this.url.protocol.replace(/:$/, ""),
       SHANOIR_URL_HOST: this.url.host,
@@ -473,7 +473,7 @@ echo "\`date\` done"
   private createDeployment(scope: Chart, name: string, ports: number[],
                            props: DeploymentProps): Deployment
   {
-    const deploy = new Deployment(scope, `${name}-deploy`, {
+    const deploy = new Deployment(scope, `deploy-${name}`, {
       replicas: 1,
       strategy: DeploymentStrategy.recreate(),
       ...props,
@@ -501,7 +501,7 @@ echo "\`date\` done"
    */
   private createJob(scope: Chart, name: string, props: JobProps): Job
   {
-    return new Job(scope, `${name}-job`, {
+    return new Job(scope, `job-${name}`, {
       ...props,
       securityContext: this.securityContext(name, props.securityContext),
     });
@@ -723,7 +723,7 @@ echo "\`date\` done"
     // The datasets container uses the dcm4chee hostname in the urls stored in the dataset_file
     // table. Using a stable alias allows renaming the service without having to updating the whole
     // table (useful when snapshotting an instance).
-    new Service(this, `dcm4chee-cname`, {
+    new Service(this, `cname-dcm4chee`, {
       metadata: { name: "dcm4chee-arc" },
       externalName: `${this.serviceName("dcm4chee")}.${self.props.namespace}.svc.cluster.local`,
     });
@@ -930,7 +930,7 @@ echo "\`date\` done"
     if (ingress.tlsCrt && ingress.tlsKey) {
       tls = [{
         hosts: [this.url.host, this.viewerUrl.host],
-        secret: new Secret(this, "tls-sec", { stringData: {
+        secret: new Secret(this, "sec-tls", { stringData: {
           "tls.crt": ingress.tlsCrt,
           "tls.key": ingress.tlsKey,
         }})}];

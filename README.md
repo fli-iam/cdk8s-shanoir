@@ -157,38 +157,38 @@ kubectl apply -f dist/shanoir-example.k8s.yaml -f dist/danger-init-shanoir-examp
 Wait until all deployments are up-to-date (this may take a few minutes):
 ```
 $ kubectl get deploy -w
-NAMESPACE        NAME                                      READY  UP-TO-DATE  AVAILABLE  AGE
 NAME                                          READY   UP-TO-DATE   AVAILABLE   AGE
-danger-init-shanoir-example-keycloak-deploy   0/1     1            0           7s
-shanoir-example-database-deploy               1/1     1            1           8s
-shanoir-example-dcm4chee-database-deploy      0/1     1            0           8s
-shanoir-example-dcm4chee-deploy               1/1     1            1           8s
-shanoir-example-keycloak-database-deploy      0/1     1            0           8s
-shanoir-example-mailpit-deploy                1/1     1            1           8s
-shanoir-example-rabbitmq-deploy               1/1     1            1           8s
-shanoir-example-solr-deploy                   1/1     1            1           8s
+danger-init-shanoir-example-deploy-keycloak   0/1     1            0           6s
+shanoir-example-deploy-database               0/1     1            0           6s
+shanoir-example-deploy-dcm4chee               0/1     1            0           6s
+shanoir-example-deploy-dcm4chee-database      0/1     1            0           6s
+shanoir-example-deploy-keycloak-database      1/1     1            1           6s
+shanoir-example-deploy-mailpit                1/1     1            1           6s
+shanoir-example-deploy-rabbitmq               1/1     1            1           6s
+shanoir-example-deploy-solr                   0/1     1            0           6s
 ...
-shanoir-example-dcm4chee-database-deploy      1/1     1            1           15s
-shanoir-example-keycloak-database-deploy      1/1     1            1           18s
-danger-init-shanoir-example-keycloak-deploy   1/1     1            1           103s
+shanoir-example-deploy-solr                   1/1     1            1           8s
+shanoir-example-deploy-dcm4chee               1/1     1            1           9s
+shanoir-example-deploy-database               1/1     1            1           16s
+shanoir-example-deploy-dcm4chee-database      1/1     1            1           16s
+danger-init-shanoir-example-deploy-keycloak   1/1     1            1           77s
 ```
-
 
 Wait until the *ms* init job is complete:
 ```
 user@shanoir-dev:~/git/cdk8s-shanoir/sample$ kubectl get job -w 
 NAME                                 STATUS     COMPLETIONS   DURATION   AGE
-danger-init-shanoir-example-ms-job   Complete   1/1           3m1s       3m30s
+danger-init-shanoir-example-job-ms   Complete   1/1           2m24s      3m8s
 ```
 
 Check the output of the containers to ensure there are no errors:
 ```
-$ kubectl get pods
-NAME                                          READY   STATUS      RESTARTS   AGE
-danger-init-shanoir-example-ms-job-pjrhd      0/5     Completed   0          2m43s
+$ kubectl get pod
+NAME                                                           READY   STATUS      RESTARTS   AGE
+danger-init-shanoir-example-job-ms-6ptwx                       0/5     Completed   0          4m26s
 ...
 
-$ kubectl logs --all-containers danger-init-shanoir-example-ms-job-pjrhd
+$ kubectl logs --all-containers danger-init-shanoir-example-job-ms-6ptwx
 ```
 
 Open the keycloak admin console at: <https://shanoir.example.org/auth/admin> with your web browser
