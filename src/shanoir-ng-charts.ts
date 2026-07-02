@@ -218,7 +218,7 @@ export class ShanoirNGChart extends Chart
   /** get or create a service
    * 
    * This function allows lazily creating a service before its associated deployment is created.
-   * This is needed to allow cross-references between.
+   * This is needed to allow cyclic references.
    */
   getOrCreateService(name: string): Service
   {
@@ -275,18 +275,6 @@ export class ShanoirNGChart extends Chart
     };
   }
 
-  createVolumeClaims(): {[key: string]: IPersistentVolumeClaim}
-  {
-    return Object.fromEntries(Object.entries(this.props.volumeClaims).map(
-      ([name, props]) => [name, new PersistentVolumeClaim(this, `${name}-pvc`, props)]
-    ));
-  }
-  createVolumes(): {[key: string]: Volume}
-  {
-    return Object.fromEntries(Object.entries(this.volumeClaims).map(
-      ([name, pvc]) => [name, Volume.fromPersistentVolumeClaim(this, `${name}-rv`, pvc)]));
-  }
-
   /** create a kubernetes secret with all passwords used in the chart  */
   private createSecret(): Secret
   {
@@ -309,7 +297,7 @@ export class ShanoirNGChart extends Chart
   }
 
   /** common config map for all shanoir microservices */
-  createCommonConfigMap(): ConfigMap
+  private createCommonConfigMap(): ConfigMap
   {
     assert(this.url.port == "");
     assert(this.url.pathname == "/");
