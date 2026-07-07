@@ -54,6 +54,7 @@ function envValue(value: string): EnvValue {
 export class ShanoirNGChart extends Chart
 {
   readonly props: ShanoirNGProps;
+  private readonly serviceSuffix: string;
 
   private readonly url: URL;
   private readonly viewerUrl: URL;
@@ -122,6 +123,7 @@ export class ShanoirNGChart extends Chart
 
     props = {namespace: id, ...props};
     super(scope, id, props);
+    this.serviceSuffix = `.${props.namespace}.svc.cluster.local`;
     this.services = {};
 
     this.props = props = {
@@ -251,22 +253,22 @@ export class ShanoirNGChart extends Chart
     return svc
   }
 
-  /** get the actual name of a service (i.e. the name of the api object)
+  /** get the fully-qualified name of a service ("<SVC>.<NS>.svc.cluster.local")
    *
    * When `lazy` is unset, the function will fail if the service does not pre-exist in
    * `this.services` (otherwise it is lazily created).
    */
-  serviceName(name: string, lazy?: boolean): string 
+  serviceFqdn(name: string, lazy?: boolean): string 
   {
     let svc = lazy ? this.getOrCreateService(name) : this.services[name]!;
-    return svc.resourceName!;
+    return svc.resourceName! + this.serviceSuffix;
   }
 
   /** get the internal url of the keycloak service */
   keycloakInternalUrl(): string
   {
     return this.props.keycloakInternalUrl ??
-      `http://${this.serviceName("keycloak")}:8080/auth`;
+      `http://${this.serviceFqdn("keycloak")}:8080/auth`;
   }
 
   /** build the actual smtp props (from the user-provided props) */
@@ -279,7 +281,7 @@ export class ShanoirNGChart extends Chart
       // use the internal mailpit container
       : {
         ...shanoirSmtpDefaults, ...smtp,
-        host: this.serviceName("mailpit", true),
+        host: this.serviceFqdn("mailpit", true),
         port: 1025,
         auth: undefined,
         starttls: "disabled",
@@ -299,7 +301,7 @@ export class ShanoirNGChart extends Chart
         db:       db,
         username: db,
         password: "password",
-        host: this.serviceName(((db=="keycloak") ? "keycloak-database" : "database"), true),
+        host: this.serviceFqdn(((db=="keycloak") ? "keycloak-database" : "database"), true),
         port: 3306,
       }]));
   }
@@ -318,7 +320,7 @@ export class ShanoirNGChart extends Chart
         db:       "pacsdb",
         username: "pacs",
         password: "pacs",
-        host: this.serviceName( "dcm4chee-database", true),
+        host: this.serviceFqdn( "dcm4chee-database", true),
         port: 5432,
       }]));
   }
@@ -608,7 +610,7 @@ echo "\`date\` done"
           KC_HOSTNAME_DEBUG: envValue("true"),
           SHANOIR_ALLOWED_ADMIN_IPS: envValue(self.props.allowedAdminIps!.join(",")),
           SHANOIR_MIGRATION: envValue("never"),
-          SHANOIR_USERS_HOST: envValue(self.serviceName("ms", true)),
+          SHANOIR_USERS_HOST: envValue(self.serviceFqdn("ms", true)),
           ...overrideEnv,
         },
         volumeMounts: [
@@ -743,7 +745,7 @@ echo "\`date\` done"
     // table (useful when snapshotting an instance).
     new Service(this, `cname-dcm4chee`, {
       metadata: { name: "dcm4chee-arc" },
-      externalName: `${this.serviceName("dcm4chee")}.${self.props.namespace}.svc.cluster.local`,
+      externalName: this.serviceFqdn("dcm4chee"),
     });
 
     return deploy;
@@ -786,7 +788,7 @@ echo "\`date\` done"
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
             SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.keycloakInternalUrl()),
             SHANOIR_STORAGE_TYPE: envValue("file-system"),
-            "spring.rabbitmq.host": envValue(self.serviceName("rabbitmq")),
+            "spring.rabbitmq.host": envValue(self.serviceFqdn("rabbitmq")),
             ...dbVariables,
             ...props.envVariables ?? {}},
           volumeMounts: [
@@ -803,16 +805,16 @@ echo "\`date\` done"
     let shanoirProps = {
       initContainers: [
         this.waitTcpServers([
-          { host: this.serviceName("rabbitmq")!, port: 5672 },
+          { host: this.serviceFqdn("rabbitmq")!, port: 5672 },
           { host: migrationsDb.host, port: migrationsDb.port! },
 
           // The datasets container may rebuild the solr index on startup (this happens
           // automatically when the solr schema is updated or when the solar pvc is cleared)
-          { host: this.serviceName("solr")!, port: 8983 },
+          { host: this.serviceFqdn("solr")!, port: 8983 },
 
           // In 'init' mode the users container synchronises its user db with keycloak
           // (to populate the keycloak db with the initial users)
-          ...(this.props.init! ? [{host: this.serviceName("keycloak"), port: 8080 }] : []),
+          ...(this.props.init! ? [{host: this.serviceFqdn("keycloak"), port: 8080 }] : []),
         ]),
         {
           name: "database-migrations",
@@ -831,7 +833,7 @@ echo "\`date\` done"
             ...this.keycloakCredentialsEnvVariables,
             ...this.smtpEnvVariables,
             "kc.admin.client.server.url": envValue(
-              `http://${this.serviceName("keycloak")}:8080/auth`),
+              `http://${this.serviceFqdn("keycloak")}:8080/auth`),
             "VIP_SERVICE_EMAIL": envValue(this.props.vip!.serviceEmail),
           },
         }),
@@ -848,7 +850,7 @@ echo "\`date\` done"
           envVariables: {
             SHANOIR_SHUTDOWN_HOUR:    envValue(`${this.props.shutdownHour}`),
             SHANOIR_CONTINUANCE_HOUR: envValue(`${this.props.continuanceHour}`),
-            SHANOIR_SOLR_HOST: envValue(this.serviceName("solr")),
+            SHANOIR_SOLR_HOST: envValue(this.serviceFqdn("solr")),
             ...this.vipEnvVariables,
             VIP_CLIENT_SECRET: this.secretEnvValue("vip-client-secret"),
           },
@@ -890,7 +892,7 @@ echo "\`date\` done"
         image: self.shanoirImage("bids-validator"),
         ...noResources,
         envVariables : {
-          AMQP_URL:  envValue(`amqp://guest:guest@${self.serviceName("rabbitmq")}:5672/`),
+          AMQP_URL:  envValue(`amqp://guest:guest@${self.serviceFqdn("rabbitmq")}:5672/`),
           IN_QUEUE:  envValue("bids.validate"),
           OUT_QUEUE: envValue("bids.validated"),
           DATA_ROOT: envValue("/var/bids-data"),
@@ -917,12 +919,12 @@ echo "\`date\` done"
       envVariables: {
         ...this.vipEnvVariables,
         // FIXME: will fail if using an external keycloak server
-        SHANOIR_KEYCLOAK_HOST: envValue(this.serviceName("keycloak")),
-        SHANOIR_USERS_HOST: envValue(this.serviceName("ms")),
-        SHANOIR_STUDIES_HOST: envValue(this.serviceName("ms")),
-        SHANOIR_IMPORT_HOST: envValue(this.serviceName("ms")),
-        SHANOIR_DATASETS_HOST: envValue(this.serviceName("ms")),
-        SHANOIR_PRECLINICAL_HOST: envValue(this.serviceName("ms")),
+        SHANOIR_KEYCLOAK_HOST: envValue(this.serviceFqdn("keycloak")),
+        SHANOIR_USERS_HOST: envValue(this.serviceFqdn("ms")),
+        SHANOIR_STUDIES_HOST: envValue(this.serviceFqdn("ms")),
+        SHANOIR_IMPORT_HOST: envValue(this.serviceFqdn("ms")),
+        SHANOIR_DATASETS_HOST: envValue(this.serviceFqdn("ms")),
+        SHANOIR_PRECLINICAL_HOST: envValue(this.serviceFqdn("ms")),
 
         SHANOIR_VIEWER_OHIF_INTERACTION_NUM_REQUESTS:
           envValue(`${this.props.viewerMaxNumRequests!.interaction!}`),
