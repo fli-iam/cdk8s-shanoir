@@ -13,7 +13,7 @@ import { URL } from "whatwg-url";
 
 import {
   defaultDockerRepository, ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults,
-  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults,
+  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults, ShanoirSmtpProps,
   shanoirViewerMaxNumRequestsDefaults, shanoirVipDefaults, shanoirVolumes,
 } from "./shanoir-ng-props";
 
@@ -80,6 +80,10 @@ export class ShanoirNGChart extends Chart
 
   constructor(scope: Construct, id: string, props: ShanoirNGProps)
   {
+    ///////////////////////////////////////////////////////////////////
+    // validate the user-provided props
+    ///////////////////////////////////////////////////////////////////
+
     //console.error("orig props:", props);
 
     assert(props.keycloakUrl == undefined); // not yet supported
@@ -90,10 +94,11 @@ export class ShanoirNGChart extends Chart
     // must provide a smtp relay
     assert((props.smtp.host != undefined) || (props.smtp.mailpit != undefined));
 
-    // optional features
+    // optional deployments
     const useInternalKeycloak            = props.keycloakUrl == undefined;
     const useInternalMysqlDatabases      = props.mysqlDatabases == undefined;
     const useInternalPostgresqlDatabases = props.postgresqlDatabases == undefined;
+    const useMailpit                     = props.smtp.mailpit != undefined;
 
     // list of volumes for which we do not need a volume claim
     const optionalVolumes = new Set([
@@ -111,24 +116,39 @@ export class ShanoirNGChart extends Chart
     checkResourceMap("mysql database", props.mysqlDatabases, shanoirMysqlDatabases);
     checkResourceMap("postgresql database", props.postgresqlDatabases, shanoirPostgresqlDatabases);
 
+    ///////////////////////////////////////////////////////////////////
+    // initialise the object and build the final props
+    ///////////////////////////////////////////////////////////////////
 
-    // apply the defaults
-    // (after this line, all keys of `props`, `props.smtp` and `props.vip` are defined)
-    props = {
+    props = {namespace: id, ...props};
+    super(scope, id, props);
+    this.services = {};
+
+    this.props = props = {
+      // apply the defaults
       namespace: id,
       dockerRepository: defaultDockerRepository(props.version ?? shanoirNGDefaults.version),
       keycloakUrl: `${props.url}/auth`,
       keycloakInternalUrl: props.keycloakUrl,
-      ...shanoirNGDefaults, ...props,
-      smtp: {...shanoirSmtpDefaults, ...props.smtp },
+      ...shanoirNGDefaults,
+     
+      // apply user-provided props
+      ...props,
+
+      // fill the child props objects
+      mysqlDatabases: this.buildMysqlDatabasesProps(props.mysqlDatabases),
+      postgresqlDatabases: this.buildPostgresqlDatabasesProps(props.postgresqlDatabases),
+      smtp: this.buildSmtpProps(props.smtp),
       viewerMaxNumRequests: {...shanoirViewerMaxNumRequestsDefaults, ...props.viewerMaxNumRequests},
       vip:  {...shanoirVipDefaults,  ...props.vip },
     };
+
     //console.error("compiled props:", props);
 
-    super(scope, id, props);
-    this.props = props;
-    this.services = {};
+
+    ///////////////////////////////////////////////////////////////////
+    // create the cdk8s constructs
+    ///////////////////////////////////////////////////////////////////
 
     if (props.init) {
       this.initChart = new Chart(scope, `danger-init-${id}`, props);
@@ -137,7 +157,9 @@ export class ShanoirNGChart extends Chart
     //////////// namespace ////////////
 
     if (props.createNamespace) {
-      new Namespace(this, "ns", { metadata: { name: props.namespace }});
+      const ns = new Namespace(this, "ns", { metadata: { name: props.namespace }});
+      // add dependency for existing services (services are lazily created by .getOrCreateService)
+      Object.values(this.services).forEach((s) => s.node.addDependency(ns));
     }
 
     //////////// volumes ////////////
@@ -165,7 +187,7 @@ export class ShanoirNGChart extends Chart
 
     //////////// smtp service ////////////
 
-    if (props.smtp.mailpit != undefined) {
+    if (useMailpit) {
       this.deployMailpit();
     }
 
@@ -247,32 +269,58 @@ export class ShanoirNGChart extends Chart
       `http://${this.serviceName("keycloak")}:8080/auth`;
   }
 
-  /** get the actual parameters for a given mysql database
-   *
-   * - resolve `host` to the internal database service if used
-   * - set default `port` value
-   */
-  mysqlDatabase(name: string): ShanoirDatabaseProps {
-    const db = this.props.mysqlDatabases![name]!;
-    return {...db,
-      host: ((db.host != "INTERNAL") ? db.host : 
-             (name == "keycloak") ? this.serviceName("keycloak-database") :
-             this.serviceName("database")),
-      port: db.port ?? 3306,
-    };
+  /** build the actual smtp props (from the user-provided props) */
+  buildSmtpProps(smtp: ShanoirSmtpProps): ShanoirSmtpProps
+  { 
+    return (smtp.mailpit == undefined)
+      // use an external smtp relay agent
+      ? {...shanoirSmtpDefaults, ...smtp}
+
+      // use the internal mailpit container
+      : {
+        ...shanoirSmtpDefaults, ...smtp,
+        host: this.serviceName("mailpit", true),
+        port: 1025,
+        auth: undefined,
+        starttls: "disabled",
+      };
   }
 
-  /** get the actual parameters for a given postgresql database
-   *
-   * - resolve `host` to the internal database service if used
-   * - set default `port` value
-   */
-  postgresqlDatabase(name: string): ShanoirDatabaseProps {
-    const db = this.props.postgresqlDatabases![name]!;
-    return {...db,
-      host: ((db.host!="INTERNAL") ? db.host : this.serviceName("dcm4chee-database")),
-      port: db.port ?? 5432,
-    };
+  /** build the actual mysql db props (from the user-provided props) */
+  private buildMysqlDatabasesProps(cfg?: {[key: string]: ShanoirDatabaseProps}):
+    {[key: string]: ShanoirDatabaseProps}
+  {
+    return Object.fromEntries((cfg != undefined)
+      // user-provided config: use external databases
+      ? Object.entries(cfg).map(([db, props]) => [db, { port: 3306, ...props }])
+
+      // no config provided: use internal mysql deployments
+      : shanoirMysqlDatabases.map((db) => [db, {
+        db:       db,
+        username: db,
+        password: "password",
+        host: this.serviceName(((db=="keycloak") ? "keycloak-database" : "database"), true),
+        port: 3306,
+      }]));
+  }
+
+  /** build the actual postgresql db props (from the user-provided props) */
+  private buildPostgresqlDatabasesProps(cfg?: {[key: string]: ShanoirDatabaseProps}):
+    {[key: string]: ShanoirDatabaseProps}
+  {
+    return Object.fromEntries((cfg != undefined)
+      // user-provided config: use external databases
+      ? Object.entries(cfg).map(([db, props]) => [db, { port: 5432, ...props }])
+      
+      // no config provided: use internal postgresql deployment
+      : shanoirPostgresqlDatabases.map((db) => [db, {
+        //FIXME should use same defaults as mysql dbs (these at the old defaults in docker-compose.yml)
+        db:       "pacsdb",
+        username: "pacs",
+        password: "pacs",
+        host: this.serviceName( "dcm4chee-database", true),
+        port: 5432,
+      }]));
   }
 
   /** create a kubernetes secret with all passwords used in the chart  */
@@ -337,34 +385,16 @@ export class ShanoirNGChart extends Chart
   /** smtp environment variables needed for outgoing mail */
   private createSmtpEnvVariables(): { [key: string]: EnvValue }
   {
-    const commonVars = {
+    return {
+      SHANOIR_SMTP_HOST: envValue(this.props.smtp.host!),
+      SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
+      SHANOIR_SMTP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
+      SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? "-"),
+      SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
+      SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
+      SHANOIR_SMTP_PASSWORD: this.secretEnvValue("smtp"),
       SHANOIR_SMTP_FROM: envValue(this.props.smtp.fromAddress),
     };
-
-    if (this.props.smtp.host == undefined) {
-      // development setup: use the mailpit service
-      return {
-        SHANOIR_SMTP_HOST: envValue(this.serviceName("mailpit", true)),
-        SHANOIR_SMTP_PORT: envValue("1025"),
-        SHANOIR_SMTP_AUTH: envValue("false"),
-        SHANOIR_SMTP_USERNAME: envValue("-"),
-        SHANOIR_SMTP_PASSWORD: envValue("-"),
-        SHANOIR_SMTP_STARTTLS_ENABLE: envValue("false"),
-        ...commonVars
-      };
-    } else {
-      // normal setup: use an external SMTP relay
-      return {
-        SHANOIR_SMTP_HOST: envValue(this.props.smtp.host),
-        SHANOIR_SMTP_PORT: envValue(this.props.smtp.port!.toString()),
-        SHANOIR_SMTP_AUTH: envValue((this.props.smtp.auth != undefined).toString()),
-        SHANOIR_SMTP_USERNAME: envValue(this.props.smtp.auth?.username ?? "-"),
-        SHANOIR_SMTP_STARTTLS_ENABLE: envValue((this.props.smtp.starttls != "disabled").toString()),
-        SHANOIR_SMTP_STARTTLS_REQUIRED: envValue((this.props.smtp.starttls == "required").toString()),
-        SHANOIR_SMTP_PASSWORD: this.secretEnvValue("smtp"),
-        ...commonVars
-      };
-    }
   }
 
   private createVipEnvVariables(): { [key: string]: EnvValue }
@@ -558,7 +588,7 @@ echo "\`date\` done"
 
   private deployKeycloak(): Deployment
   {
-    const db = this.mysqlDatabase("keycloak")!;
+    const db = this.props.mysqlDatabases!["keycloak"]!;
     let tmp = Volume.fromEmptyDir(this, "keycloak-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
 
     let self = this;
@@ -650,7 +680,7 @@ echo "\`date\` done"
 
   private deployDcm4chee(): Deployment
   {
-    const dcm4cheeDb = this.postgresqlDatabase("dcm4chee");
+    const dcm4cheeDb = this.props.postgresqlDatabases!["dcm4chee"]!;
     let self = this;
     function optVolume(name: string, sizeMb: number): Volume {
       return self.volumes[name]
@@ -722,7 +752,7 @@ echo "\`date\` done"
   /** Deploy the shanoir microservices */
   private deployMicroservices(): Deployment | undefined
   {
-    const migrationsDb = this.mysqlDatabase("migrations");
+    const migrationsDb = this.props.mysqlDatabases!["migrations"];
     // TODO: https://github.com/fli-iam/shanoir-ng/issues/3430
     assert(migrationsDb.db=="migrations" &&
            migrationsDb.username=="migrations" &&
@@ -737,7 +767,7 @@ echo "\`date\` done"
     {
       let dbVariables = {};
       if (hasDatabase) {
-        const db = self.mysqlDatabase(name);
+        const db = self.props.mysqlDatabases![name]!;
         dbVariables = {
           "SHANOIR_DB_HOST": envValue(db.host),
           "SHANOIR_DB_PORT": envValue(db.port!.toString()),

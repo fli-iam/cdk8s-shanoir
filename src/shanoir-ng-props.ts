@@ -135,31 +135,6 @@ export const shanoirPostgresqlDatabases = [
   "dcm4chee",
 ];
 
-function defaultMysqlDatabases(): {[key: string]: ShanoirDatabaseProps}
-{
-  var dbProps: {[key: string]: ShanoirDatabaseProps} = {};
-  for (let db of shanoirMysqlDatabases) {
-    dbProps[db] = {
-      host: "INTERNAL",
-      db: db,
-      username: db,
-      password: "password",
-    };
-  }
-  return dbProps;
-}
-
-function defaultPostgresqlDatabases(): {[key: string]: ShanoirDatabaseProps}
-{
-  return {
-    "dcm4chee": {
-      host: "INTERNAL",
-      db: "pacsdb",
-      username: "pacs",
-      password: "pacs",
-    }};
-}
-
 export const defaultUids = {
   "database": 510,
   "rabbitmq": 511,
@@ -187,8 +162,6 @@ export const shanoirNGDefaults = {
   smtp: shanoirSmtpDefaults,
   vip: shanoirVipDefaults,
   createNamespace: true,
-  mysqlDatabases: defaultMysqlDatabases(),
-  postgresqlDatabases: defaultPostgresqlDatabases(),
   uids: defaultUids,
   shutdownHour: 0,
   continuanceHour: 0,
