@@ -111,7 +111,26 @@ app.synth();
 Notes:
 - The full list of options is [documented in the `ShanoirNGProps`class](src/shanoir-ng-props.ts).
 
-- for a development instance, you may use the following SMTP config:
+- The chart includes
+  [network policy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
+  api objects so as to implement ingress and egress filtering on every pod.
+
+  When external services are involved (eg: the mysql databases are hosted on a server that is not
+  part of the chart), the usual connections parameters `host` and `port` in the
+  `ShanoirDatabaseProps` object must be completed with a `peer` parameter (of type
+  [INetworkPolicy](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.INetworkPolicyPeer))  in order to generate the egress rule matching the destination host.
+
+  Likewise, the incoming traffic from the
+  [Ingress controller](https://kubernetes.io/docs/concepts/services-networking/ingress/) of the
+  cluster is authorized by an ingress rule using the `ingress.peer` parameter to identify the
+  traffic from the controller. By default this parameter is set to match the nginx ingress
+  controller deployed in the `ingress-nginx` namespace. It must be changed when using a different
+  ingress controller.
+
+  For troubleshooting purpose, the generation of the ingress or egress rules can be disabled by
+  setting `networkPolicies.ingress` or `networkPolicies.egress` to `false`.
+
+- For a development instance, you may use the following SMTP config:
   ```ts
   smtp: {
     mailpit: { host: "mailpit.example.org" },

@@ -1,7 +1,12 @@
 
+import { RootConstruct } from "constructs";
 import { ChartProps } from "cdk8s";
-import { PersistentVolumeClaimProps } from "cdk8s-plus-33";
+import {
+  INetworkPolicyPeer, Namespaces, NetworkPolicyIpBlock, NetworkPolicyPort, NetworkPolicyRule,
+  PersistentVolumeClaimProps, Pods,
+} from "cdk8s-plus-33";
 
+const root = new RootConstruct();
 
 export interface ShanoirCredentials {
   readonly username: string;
@@ -12,6 +17,11 @@ export interface ShanoirCredentials {
 export interface ShanoirDatabaseProps extends ShanoirCredentials {
   readonly db: string;
   readonly host: string;
+  /** egress peer
+   *
+   * see {@link ShanoirNetworkPoliciesProps}
+   */
+  readonly peer?: ShanoirNetworkPolicyPeer;
   readonly port?: number;
 }
 
@@ -30,6 +40,12 @@ export interface ShanoirSmtpProps {
    * Leave it empty when using the mailpit service (see {@link mailpit})
    */
   readonly host?: string;
+
+  /** egress peer
+   *
+   * see {@link ShanoirNetworkPoliciesProps}
+   */
+  readonly peer?: ShanoirNetworkPolicyPeer;
 
   /** relay TCP port
    *
@@ -77,6 +93,7 @@ export interface ShanoirMailpitProps {
 /** Default values for {@link ShanoirVipProps} */
 export const shanoirVipDefaults = {
   url: "https://vip.creatis.insa-lyon.fr",
+  peer: NetworkPolicyIpBlock.ipv4(root, "vip-ip", "134.214.205.86/32"),
   clientSecret: "SECRET",
   serviceEmail: "",
 };
@@ -84,6 +101,11 @@ export const shanoirVipDefaults = {
 /** VIP (Virtual Imaging Platform) client configuration */
 export interface ShanoirVipProps {
   readonly url: string;
+  /** egress peer
+   *
+   * see {@link ShanoirNetworkPoliciesProps}
+   */
+  readonly peer?: ShanoirNetworkPolicyPeer;
   readonly clientSecret: string;
   readonly serviceEmail: string;
 }
@@ -179,9 +201,23 @@ export function defaultDockerRepository(version: string): string
                                                   : "ghcr.io/fli-iam/shanoir-ng";
 }
 
+export const shanoirIngressDefaults = {
+  peer: new Pods(root, "nginx-pods", [], {"app.kubernetes.io/component": "controller"},
+                 new Namespaces(root, "nginx-ns", [], ["ingress-nginx"])),
+}
+
 export interface ShanoirIngressProps {
   /** Ingress class */
   readonly className?: string
+
+  /** ingress peer
+   *
+   * see {@link ShanoirNetworkPoliciesProps}
+   *
+   * @default matches the nginx ingress controller (pods tagged "app.kubernetes.io/component:
+   *          controller" in the "ingress-nginx" namespace
+   */
+  readonly peer?: ShanoirNetworkPolicyPeer;
 
   /** TLS certificate (PEM format)
    *
@@ -218,6 +254,103 @@ export interface ShanoirViewerMaxNumRequestsProps
   readonly interaction?: number,
   readonly thumbnail?: number,
   readonly prefetch?: number,
+}
+
+export type ShanoirNetworkPolicyPeer = string | INetworkPolicyPeer;
+
+/** Specification of an authorized network flow
+ *
+ * This structure represents an authorized network flow between a source `src` and a destination
+ * `dst`. It is used to generate the ingress/egress rules in the cdk8s network policies.
+ *
+ * "src" and "dst" may be either a INetworkPeer object representing an external source or
+ * destination or a string identifying a workload (deployment or job) created by
+ * {@link ShanoirNGChart.createDeployment()} or {@link ShanoirNGChart.createJob()} and stored in
+ * {@link ShanoirNGChart.workloads}.
+ *
+ * If "src" is a string, then an egress rule with "{peer: flow.dst, ports: flow.ports}" will be
+ * added to the policy applied to the source pods.
+ *
+ * If "dst" is a string, then an ingress rule with "{peer: flow.src, ports: flow.ports}" will be
+ * added to the policy applied to the destination pods.
+ *
+ * @example rule allowing mysql connections from 192.0.2.0/24 to the "database" deployment
+ *
+ * import { NetworkPolicyIpBlock, NetworkPolicyPort } from "cdk8s-plus-33";
+ *
+ * const rule = {
+ *    src: NetworkPolicyIpBlock.ipv4(app, "test-net-1", "192.0.2.0/24"),
+ *    dst: "database",
+ *    ports: [NetworkPolicyPort.tcp(3306)],
+ * };
+ */
+export interface ShanoirNetworkPolicyFlow
+{
+  readonly src?: ShanoirNetworkPolicyPeer,
+  readonly dst?: ShanoirNetworkPolicyPeer,
+  readonly ports: NetworkPolicyPort[],
+}
+
+export const shanoirNetworkPoliciesDefaults = {
+  ingress: true,
+  egress: true,
+  extraFlows: [],
+  egressDnsRule: {
+    peer: new Pods(root, "dns-pods", [], {"k8s-app": "kube-dns"},
+                   new Namespaces(root, "dns-ns", [], ["kube-system"])),
+    ports: [NetworkPolicyPort.udp(53), NetworkPolicyPort.tcp(53)],
+  },
+}
+
+/** Configuration of the network policies
+ *
+ * Every workload (deployment or job) instantiated by the ShanoirNGChart comes along with a network
+ * policy that implements ingress and egress filtering.
+ *
+ * By befault both ingress and egress rules are generated. They can be independently enabled or
+ * disabled with {@link ingress} and {@link egress}.
+ *
+ * The generated rules only cover the flows that are strictly needed to operate shanoir. Additional
+ * rules can be configured in {@link extraFlows}.
+ *
+ * Interactions with external services (i.e. services that are not part of ShanoirNGChart) are
+ * addressed but they require the config for these services to provide a value for the "peer"
+ * property.  Especially the generation of ingress rules will fail if
+ * {@link ShanoirIngressProps.peer} is undefined and the generation of egress rules will fail if any
+ * of {@link ShanoirDatabaseProps.peer}, {@link ShanoirSmtpProps.peer} or
+ * {@link ShanoirVipProps.peer} is undefined.
+ */
+export interface ShanoirNetworkPoliciesProps {
+  /** generate ingress rules
+   *
+   * If disabled (not recommended), the pods will not have any ingress policy and will be reachable
+   * from any cluster ip.
+   *
+   * @default true
+   */
+  readonly ingress?: boolean;
+
+  /** generate egress rules
+   *
+   * If disabled (not recommended), the pods will not have any egress folicy and will be able to
+   * reach any ip.
+   *
+   * @default true
+   */
+  readonly egress?: boolean;
+
+  /** additional authorized flows */
+  readonly extraFlows?: ShanoirNetworkPolicyFlow[];
+
+  /** egress rule for reaching the dns resolver
+   *
+   * This is the rule giving access to dns resolver needed for service discovery between the shanoir
+   * pods.
+   *
+   * @default UDP and TCP port 53 to the dns resolver of the cluster
+   *          (pods tagged "k8s-app: kube-dns" in the "kube-system" namespace)
+   */
+  readonly egressDnsRule?: NetworkPolicyRule;
 }
 
 /** Configuration of a shanoir instance */
@@ -332,13 +465,16 @@ export interface ShanoirNGProps extends ChartProps {
   /** Ingress configuration */
   readonly ingress: ShanoirIngressProps;
 
+  /** Network policies configuration */
+  readonly networkPolicies?: ShanoirNetworkPoliciesProps;
+
   /** Create the kubernetes namespace
    *
    * @default see {@link shanoirNGDefaults}
    */
   readonly createNamespace?: boolean;
 
-  /** uid/gid to be assigned for each deployment/job
+  /** uid/gid to be assigned for each workload
    *
    * The default security context generated by cdk8s forbids running containers as root.
    *

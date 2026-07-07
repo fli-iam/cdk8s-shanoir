@@ -3,18 +3,19 @@ import { Construct } from "constructs";
 import { Chart, Size } from "cdk8s";
 import {
   ConfigMap, ContainerProps, ContainerRestartPolicy, Deployment, DeploymentProps,
-  DeploymentStrategy, EnvFrom, EnvValue, Ingress, IngressBackend, IPersistentVolumeClaim, Job,
-  JobProps, Namespace, PersistentVolumeClaim, PodSecurityContextProps, RestartPolicy, Secret,
-  Service, Volume, VolumeMount,
+  DeploymentStrategy, EnvFrom, EnvValue, Ingress, IngressBackend, INetworkPolicyPeer,
+  IPersistentVolumeClaim, Job, JobProps, Namespace, NetworkPolicy, NetworkPolicyPort,
+  NetworkPolicyProps, NetworkPolicyTrafficDefault, PersistentVolumeClaim, PodSecurityContextProps,
+  RestartPolicy, Secret, Service, Volume, VolumeMount, Workload,
 
-} from "cdk8s-plus-33";
-import { quote } from "shell-quote";
-import { URL } from "whatwg-url";
+} from "cdk8s-plus-33"; import { quote } from "shell-quote"; import { URL } from "whatwg-url";
 
 import {
-  defaultDockerRepository, ShanoirDatabaseProps, ShanoirNGProps, shanoirNGDefaults,
-  shanoirMysqlDatabases, shanoirPostgresqlDatabases, shanoirSmtpDefaults, ShanoirSmtpProps,
+  defaultDockerRepository, ShanoirDatabaseProps, ShanoirNetworkPolicyFlow, ShanoirNetworkPolicyPeer,
+  ShanoirNGProps, shanoirIngressDefaults, shanoirNGDefaults, shanoirMysqlDatabases,
+  shanoirNetworkPoliciesDefaults, shanoirPostgresqlDatabases, shanoirSmtpDefaults, ShanoirSmtpProps,
   shanoirViewerMaxNumRequestsDefaults, shanoirVipDefaults, shanoirVolumes,
+
 } from "./shanoir-ng-props";
 
 //TODO: allocate resources (see #11)
@@ -51,6 +52,11 @@ function envValue(value: string): EnvValue {
   return EnvValue.fromValue(value);
 }
 
+function httpUrlPort(url: URL): number {
+  return parseInt(url.port || ((url.protocol == "http:") ? "80" : "443"));
+}
+
+
 export class ShanoirNGChart extends Chart
 {
   readonly props: ShanoirNGProps;
@@ -59,6 +65,8 @@ export class ShanoirNGChart extends Chart
   private readonly url: URL;
   private readonly viewerUrl: URL;
 
+  private readonly flows: ShanoirNetworkPolicyFlow[];
+
   readonly commonConfigMap: ConfigMap;
   readonly secret: Secret;
   readonly smtpEnvVariables: {[key: string]: EnvValue};
@@ -66,6 +74,7 @@ export class ShanoirNGChart extends Chart
   readonly keycloakCredentialsEnvVariables: {[key: string]: EnvValue};
   readonly dcm4cheeDbEnvVariables: {[key: string]: EnvValue};
 
+  readonly workloads: {[key: string]: Workload};
   readonly services: {[key: string]: Service};
   readonly volumes: {[key: string]: Volume};
   readonly volumeClaims: {[key: string]: IPersistentVolumeClaim};
@@ -117,6 +126,10 @@ export class ShanoirNGChart extends Chart
     checkResourceMap("mysql database", props.mysqlDatabases, shanoirMysqlDatabases);
     checkResourceMap("postgresql database", props.postgresqlDatabases, shanoirPostgresqlDatabases);
 
+    // ensure network policy flows reference at least one internal workload
+    assert((props.networkPolicies?.extraFlows ?? []).every(
+      (flow) => (typeof flow.src == "string") || typeof flow.dst == "string"));
+
     ///////////////////////////////////////////////////////////////////
     // initialise the object and build the final props
     ///////////////////////////////////////////////////////////////////
@@ -125,6 +138,8 @@ export class ShanoirNGChart extends Chart
     super(scope, id, props);
     this.serviceSuffix = `.${props.namespace}.svc.cluster.local`;
     this.services = {};
+    this.workloads = {};
+    this.flows = [];
 
     this.props = props = {
       // apply the defaults
@@ -138,7 +153,9 @@ export class ShanoirNGChart extends Chart
       ...props,
 
       // fill the child props objects
+      ingress: {...shanoirIngressDefaults, ...props.ingress},
       mysqlDatabases: this.buildMysqlDatabasesProps(props.mysqlDatabases),
+      networkPolicies: {...shanoirNetworkPoliciesDefaults, ...props.networkPolicies},
       postgresqlDatabases: this.buildPostgresqlDatabasesProps(props.postgresqlDatabases),
       smtp: this.buildSmtpProps(props.smtp),
       viewerMaxNumRequests: {...shanoirViewerMaxNumRequestsDefaults, ...props.viewerMaxNumRequests},
@@ -231,6 +248,9 @@ export class ShanoirNGChart extends Chart
     }
 
     this.createIngress();
+
+    this.flows.push(...this.props.networkPolicies!.extraFlows!);
+    this.createNetworkPolicies();
   }
 
   /** generate the OCI image name for a given shanoir service */
@@ -282,6 +302,7 @@ export class ShanoirNGChart extends Chart
       : {
         ...shanoirSmtpDefaults, ...smtp,
         host: this.serviceFqdn("mailpit", true),
+        peer: "mailpit",
         port: 1025,
         auth: undefined,
         starttls: "disabled",
@@ -297,13 +318,17 @@ export class ShanoirNGChart extends Chart
       ? Object.entries(cfg).map(([db, props]) => [db, { port: 3306, ...props }])
 
       // no config provided: use internal mysql deployments
-      : shanoirMysqlDatabases.map((db) => [db, {
-        db:       db,
-        username: db,
-        password: "password",
-        host: this.serviceFqdn(((db=="keycloak") ? "keycloak-database" : "database"), true),
-        port: 3306,
-      }]));
+      : shanoirMysqlDatabases.map((db) => {
+        const service = (db=="keycloak") ? "keycloak-database" : "database";
+        return [db, {
+          db:       db,
+          username: db,
+          password: "password",
+          host: this.serviceFqdn(service, true),
+          peer: service,
+          port: 3306,
+        }];
+      }));
   }
 
   /** build the actual postgresql db props (from the user-provided props) */
@@ -320,7 +345,8 @@ export class ShanoirNGChart extends Chart
         db:       "pacsdb",
         username: "pacs",
         password: "pacs",
-        host: this.serviceFqdn( "dcm4chee-database", true),
+        host: this.serviceFqdn("dcm4chee-database", true),
+        peer: "dcm4chee-database",
         port: 5432,
       }]));
   }
@@ -491,9 +517,15 @@ echo "\`date\` done"
    * {@link getOrCreateService} so that it can be referenced by prior objects.
    */
   private createDeployment(scope: Chart, name: string, ports: number[],
+                           egressAllow: {dst?: string | INetworkPolicyPeer,
+                                         ports: NetworkPolicyPort[]}[],
                            props: DeploymentProps): Deployment
   {
-    const deploy = new Deployment(scope, `deploy-${name}`, {
+    assert(this.workloads[name] == undefined);
+    
+    egressAllow.forEach((flow) => this.flows.push({src: name, ...flow}));
+
+    const deploy = this.workloads[name] = new Deployment(scope, `deploy-${name}`, {
       replicas: 1,
       strategy: DeploymentStrategy.recreate(),
       ...props,
@@ -519,17 +551,26 @@ echo "\`date\` done"
    *
    * 'props.securityContext' is processed through {@link this.securityContext}.
    */
-  private createJob(scope: Chart, name: string, props: JobProps): Job
+  private createJob(scope: Chart, name: string,
+                    egressAllow: {dst?: string | INetworkPolicyPeer,
+                                  ports: NetworkPolicyPort[]}[],
+                    props: JobProps): Job
   {
-    return new Job(scope, `job-${name}`, {
+    assert(this.workloads[name] == undefined);
+
+    egressAllow.forEach((flow) => this.flows.push({src: name, ...flow}));
+
+    const job = this.workloads[name] = new Job(scope, `job-${name}`, {
       ...props,
       securityContext: this.securityContext(name, props.securityContext),
     });
-  }
+    return job
+   }
+
 
   private deployMailpit(): Deployment
   {
-    return this.createDeployment(this, "mailpit", [1025, 8025], {
+    return this.createDeployment(this, "mailpit", [1025, 8025], [], {
       containers: [{
         image: "axllent/mailpit",
         securityContext: { readOnlyRootFilesystem: false },
@@ -539,7 +580,7 @@ echo "\`date\` done"
 
   private deployRabbitmq(): Deployment
   {
-    return this.createDeployment(this, "rabbitmq", [5672], { containers: [{
+    return this.createDeployment(this, "rabbitmq", [5672], [], { containers: [{
       image: "rabbitmq:3.10.7",
       ...noResources,
       volumeMounts: [
@@ -563,7 +604,7 @@ echo "\`date\` done"
         };
       let tmp = Volume.fromEmptyDir(this, `${name}-tmp`, "tmp", { sizeLimit: Size.mebibytes(8) });
 
-      return this.createDeployment(this, name, [3306], { 
+      return this.createDeployment(this, name, [3306], [], { 
         containers: [{
           image: this.shanoirImage(name),
           ...noResources,
@@ -624,8 +665,14 @@ echo "\`date\` done"
       };
     }
 
+    const egress = [
+      {dst: db.peer,              ports: [NetworkPolicyPort.tcp(db.port!)]},
+      {dst: this.props.smtp.peer, ports: [NetworkPolicyPort.tcp(this.props.smtp.port!)]},
+      {dst: "ms",                 ports: [NetworkPolicyPort.tcp(9901)]},
+    ];
+
     if (this.props.init) {
-      return this.createDeployment(this.initChart!, "keycloak", [8080], {
+      return this.createDeployment(this.initChart!, "keycloak", [8080], egress, {
         // run keycloak in "init" mode (with the http server disabled to avoid detection by the
         // wait-tcp-servers init-container in the 'ms' deployment)
         initContainers: [kcContainer({
@@ -636,7 +683,7 @@ echo "\`date\` done"
         containers: [kcContainer({})],
       });
     } else {
-      return this.createDeployment(this, "keycloak", [8080], {
+      return this.createDeployment(this, "keycloak", [8080], egress, {
         containers: [kcContainer({})]
       });
     }
@@ -646,7 +693,7 @@ echo "\`date\` done"
   {
     let tmp = Volume.fromEmptyDir(this, "solr-tmp", "tmp", { sizeLimit: Size.mebibytes(8) });
 
-    return this.createDeployment(this, "solr", [8983], { containers: [{
+    return this.createDeployment(this, "solr", [8983], [], { containers: [{
       image: this.shanoirImage("solr"),
       ...noResources,
       envVariables: {
@@ -663,7 +710,7 @@ echo "\`date\` done"
   {
     let tmp = Volume.fromEmptyDir(this, `dcm4chee-database-tmp`, "tmp", { sizeLimit: Size.mebibytes(1) });
 
-    return this.createDeployment(this, "dcm4chee-database", [5432], { containers: [{
+    return this.createDeployment(this, "dcm4chee-database", [5432], [], { containers: [{
       image: "dcm4che/postgres-dcm4chee:14.4-27",
       ...noResources,
       volumeMounts: [
@@ -689,7 +736,9 @@ echo "\`date\` done"
         ?? Volume.fromEmptyDir(self, name, name, {sizeLimit: Size.mebibytes(sizeMb)});
     }
 
-    let deploy = this.createDeployment(this, "dcm4chee", [8081, 11112], {
+    let deploy = this.createDeployment(this, "dcm4chee", [8081, 11112], [
+      { dst: dcm4cheeDb.peer,  ports: [NetworkPolicyPort.tcp(dcm4cheeDb.port!)] }
+    ], {
       // ldap sidecar container
       initContainers: [{
         name: "ldap",
@@ -867,9 +916,24 @@ echo "\`date\` done"
         }),
     ]};
 
+    const rabbitmqEgress = [
+      {dst: "rabbitmq",                        ports: [NetworkPolicyPort.tcp(5672)]}, 
+    ];
+    const msEgress = [
+      ...rabbitmqEgress,
+      {dst: "dcm4chee",                        ports: [NetworkPolicyPort.tcp(8081)]},
+      {dst: "keycloak",                        ports: [NetworkPolicyPort.tcp(8080)]},
+      {dst: "solr",                            ports: [NetworkPolicyPort.tcp(8983)]},
+      {dst: migrationsDb.peer,                 ports: [NetworkPolicyPort.tcp(migrationsDb.port!)]},
+      {dst: this.props.smtp.peer ?? "mailpit", ports: [NetworkPolicyPort.tcp(this.props.smtp.port!)]},
+      {dst: this.props.vip!.peer, ports: [
+        NetworkPolicyPort.tcp(httpUrlPort(new URL(this.props.vip!.url)))]},
+    ];
+
+
     if (this.props.init!) {
       // initialisation mode
-      this.createJob(this.initChart!, "ms", {
+      this.createJob(this.initChart!, "ms", msEgress, {
         ...shanoirProps,
         restartPolicy: RestartPolicy.NEVER,
       });
@@ -879,7 +943,7 @@ echo "\`date\` done"
 
     } else {
       // normal mode
-      this.createDeployment(this, "nifti-conversion", [], { containers: [
+      this.createDeployment(this, "nifti-conversion", [], rabbitmqEgress, { containers: [
         shanoirContainer("nifti-conversion", false, {
           extraVolumeMounts: [
             { path: "/var/bids-data",     volume: this.volumes["bids-data"]! },
@@ -887,7 +951,7 @@ echo "\`date\` done"
           ],
         }),
       ]});
-      this.createDeployment(this, "bids-validator", [], { containers: [{
+      this.createDeployment(this, "bids-validator", [], rabbitmqEgress, { containers: [{
         name: "bids-validator",
         image: self.shanoirImage("bids-validator"),
         ...noResources,
@@ -903,13 +967,17 @@ echo "\`date\` done"
         securityContext: self.securityContext("ms"),
       }]});
 
-      return this.createDeployment(this, "ms", [9901, 9902, 9903, 9904, 9905], shanoirProps);
+      return this.createDeployment(this, "ms", [9901, 9902, 9903, 9904, 9905], msEgress,
+                                   shanoirProps);
     }
   }
 
   private deployNginx(): Deployment
   {
-    return this.createDeployment(this, "nginx", [80], { containers: [{
+    return this.createDeployment(this, "nginx", [80], [
+      {dst: "keycloak", ports: [NetworkPolicyPort.tcp(8080)]},
+      {dst: "ms",       ports: [NetworkPolicyPort.tcpRange(9901, 9905)]},
+    ], { containers: [{
       image: this.shanoirImage("nginx"),
       ...noResources,
       volumeMounts: [
@@ -957,12 +1025,16 @@ echo "\`date\` done"
     }
 
     if (this.services["nginx"] != undefined) {
+      this.flows.push({src: ingress.peer, dst: "nginx", ports: [NetworkPolicyPort.tcp(80)]});
+
       let nginxBackend = IngressBackend.fromService(this.services["nginx"]!);
       rules.push({ host: this.url.host, backend: nginxBackend });
       rules.push({ host: this.viewerUrl.host, backend: nginxBackend });
     }
 
     if (this.services["keycloak"] != undefined && ingress.exposeKeycloakAdminConsole) { 
+      this.flows.push({src: ingress.peer, dst: "keycloak", ports: [NetworkPolicyPort.tcp(8080)]});
+
       let keycloakBackend = IngressBackend.fromService(this.services["keycloak"]!);
       rules.push({ host: this.url.host, path: "/auth/admin/", backend: keycloakBackend});
       rules.push({ host: this.url.host, path: "/auth/realms/master/", backend: keycloakBackend});
@@ -970,6 +1042,8 @@ echo "\`date\` done"
     }
 
     if (this.props.smtp.mailpit?.host != undefined) {
+      this.flows.push({src: ingress.peer, dst: "mailpit", ports: [NetworkPolicyPort.tcp(8025)]});
+
       rules.push({ host: this.props.smtp.mailpit!.host!,
                    backend: IngressBackend.fromService(this.services["mailpit"]!, { port: 8025 })});
     }
@@ -991,5 +1065,62 @@ echo "\`date\` done"
       tls: tls,
       rules: rules,
     });
+  }
+
+  private createNetworkPolicies()
+  {
+    const ingressEnabled = this.props.networkPolicies!.ingress!;
+    const egressEnabled  = this.props.networkPolicies!.egress!;
+    if (!ingressEnabled && !egressEnabled) {
+      return;
+    }
+
+    let netpols: {[key: string]: NetworkPolicyProps} = Object.fromEntries(
+      Object.entries(this.workloads).map(([name, workload]) => [name, {
+        selector: workload,
+        ingress: ingressEnabled ? { default: NetworkPolicyTrafficDefault.DENY, rules: [] }
+                                : undefined,
+        egress: egressEnabled   ? { default: NetworkPolicyTrafficDefault.DENY,
+                                    rules: [this.props.networkPolicies!.egressDnsRule!]}
+                                : undefined,
+      }]));
+
+    let self = this;
+    function resolve(peer?: ShanoirNetworkPolicyPeer): [ INetworkPolicyPeer | undefined,
+                                                         NetworkPolicyProps | undefined, ]
+    {
+      return (typeof peer == "string") ? [self.workloads[peer], netpols[peer]]
+                                       : [peer, undefined];
+    }
+
+    let error = false;
+    for (const flow of this.flows) {
+      let [srcPeer, srcPol] = resolve(flow.src);
+      let [dstPeer, dstPol] = resolve(flow.dst);
+
+      if (ingressEnabled && dstPol != undefined) {
+        if (srcPeer==undefined) {
+          console.error(`ERROR: undefined src peer: cannot create`+
+                        ` ingress network policy rule for ${flow.src}->${flow.dst}`);
+          error = true;
+        } else {
+          dstPol.ingress!.rules!.push({ peer: srcPeer, ports: flow.ports });
+        }
+      }
+      if (egressEnabled && srcPol != undefined) {
+        if (dstPeer==undefined) {
+          console.error(`ERROR: undefined dst peer: cannot create`+
+                        ` egress network policy rule for ${flow.src}->${flow.dst}`);
+          error = true;
+        } else {
+          srcPol.egress!.rules!.push({ peer: dstPeer!, ports: flow.ports });
+        }
+      }
+    }
+    error;//assert(!error);
+
+    for (const [name, netpol] of Object.entries(netpols)) {
+      new NetworkPolicy(this, `netpol-${name}`, netpol)
+    }
   }
 }
