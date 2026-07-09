@@ -67,7 +67,7 @@ export interface ShanoirSmtpProps {
 
   /** Configuration of the Mailpit service
    *
-   * If set, this deployment will include a Mailpit SMTP server for catching outgoing emails.
+   * If set, this chart will include a Mailpit SMTP server for catching outgoing emails.
    * It will be used when {@link ShanoirSmtpProps.host} is undefined.
    *
    * Mailpit is a dummy SMTP server for testing purpose. DO NOT USE IT IN PRODUCTION.
@@ -399,7 +399,7 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Mysql databases parameters
    *
-   * If unset, this deployment will include a mysql container for hosting the databases.
+   * If unset, this chart will include a mysql deployment for hosting the databases.
    *
    * Otherwise the object must contain all keys listed in {@link shanoirMysqlDatabases}
    * (except 'keycloak' which may be omitted when using an external keycloak server)
@@ -408,7 +408,7 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Postgresql databases 
    *
-   * If unset, this deployment will include a postgresql container for hosting the databases.
+   * If unset, this chart will include a postgresql deployment for hosting the databases.
    *
    * Otherwise the object must contain all keys listed in {@link shanoirPostgresqlDatabases}
    */
@@ -425,7 +425,7 @@ export interface ShanoirNGProps extends ChartProps {
 
   /** Url of the keycloak server (if external)
   *
-  * If undefined, this deployment will include a keycloak container reachable at `${this.url}/auth/`
+  * If undefined, this chart will include a keycloak deployment reachable at `${this.url}/auth/`
   */
   readonly keycloakUrl?: string;
 
