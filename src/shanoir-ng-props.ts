@@ -25,6 +25,36 @@ export interface ShanoirDatabaseProps extends ShanoirCredentials {
   readonly port?: number;
 }
 
+export interface ShanoirKeycloakProps
+{
+  /** Url of the keycloak server (if external)
+  *
+  * If undefined, the chart will include a keycloak deployment reachable at the `/auth` path on the
+  * same hostname as the shanoir instance.
+  */
+  readonly url?: string;
+
+  /** Internal url of the keycloak server
+   *
+   * This parameter may contain an alternate URL that will be used to reach the keycloak server from
+   * the shanoir microservices. It must not be set if {@link keycloakUrl} is undefined.
+   *
+   * If undefined, the deployment will use the same value as {@link keycloakUrl}.
+   */
+  readonly internalUrl?: string;
+
+  /** egress peer to authorize traffic from shanoir pods to keycloak
+   *
+   * It must not be set if {@link keycloakUrl} is undefined.
+   *
+   * see {@link ShanoirNetworkPoliciesProps}
+   */
+  readonly peer?: ShanoirNetworkPolicyPeer;
+
+  /** Keycloak account (master realm) for managing users */
+  readonly credentials: ShanoirCredentials;
+}
+
 /** Default values for {@link ShanoirSmtpProps} */
 export const shanoirSmtpDefaults = {
   port: 25,
@@ -414,6 +444,9 @@ export interface ShanoirNGProps extends ChartProps {
    */
   readonly postgresqlDatabases?: {[key: string]: ShanoirDatabaseProps};
 
+  /** Keycloak parameters */
+  readonly keycloak: ShanoirKeycloakProps;
+
   /** SMTP parameters for outgoing emails */
   readonly smtp: ShanoirSmtpProps;
 
@@ -422,24 +455,6 @@ export interface ShanoirNGProps extends ChartProps {
   * @example ["192.0.2.1", "2001:db8:1::/64"]
   */
   readonly allowedAdminIps?: Array<string>;
-
-  /** Url of the keycloak server (if external)
-  *
-  * If undefined, this chart will include a keycloak deployment reachable at `${this.url}/auth/`
-  */
-  readonly keycloakUrl?: string;
-
-  /** Internal url of the keycloak server
-   *
-   * This parameter may contain an alternate URL to reach the keycloak server from the shanoir
-   * microservices. It must not be set if {@link keycloakUrl} is undefined.
-   *
-   * If undefined, the deployment will use the same value as {@link keycloakUrl}.
-   */
-  readonly keycloakInternalUrl?: string;
-
-  /** Keycloak account (master realm) for managing users */
-  readonly keycloakCredentials: ShanoirCredentials;
 
   /** VIP (Virtual Imaging Platform) client configuration
   *

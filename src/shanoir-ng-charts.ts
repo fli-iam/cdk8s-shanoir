@@ -11,10 +11,11 @@ import {
 } from "cdk8s-plus-33"; import { quote } from "shell-quote"; import { URL } from "whatwg-url";
 
 import {
-  defaultDockerRepository, ShanoirDatabaseProps, ShanoirNetworkPolicyFlow, ShanoirNetworkPolicyPeer,
-  ShanoirNGProps, shanoirIngressDefaults, shanoirNGDefaults, shanoirMysqlDatabases,
-  shanoirNetworkPoliciesDefaults, shanoirPostgresqlDatabases, shanoirSmtpDefaults, ShanoirSmtpProps,
-  shanoirViewerMaxNumRequestsDefaults, shanoirVipDefaults, shanoirVolumes,
+  defaultDockerRepository, ShanoirDatabaseProps, ShanoirKeycloakProps, ShanoirNetworkPolicyFlow,
+  ShanoirNetworkPolicyPeer, ShanoirNGProps, shanoirIngressDefaults, shanoirNGDefaults,
+  shanoirMysqlDatabases, shanoirNetworkPoliciesDefaults, shanoirPostgresqlDatabases,
+  shanoirSmtpDefaults, ShanoirSmtpProps, shanoirViewerMaxNumRequestsDefaults, shanoirVipDefaults,
+  shanoirVolumes,
 
 } from "./shanoir-ng-props";
 
@@ -96,16 +97,17 @@ export class ShanoirNGChart extends Chart
 
     //console.error("orig props:", props);
 
-    assert(props.keycloakUrl == undefined); // not yet supported
+    assert(props.keycloak.url == undefined); // not yet supported
 
-    // keycloakInternalUrl cannot be used if keycloakUrl is unset
-    assert(!(props.keycloakInternalUrl != undefined && props.keycloakUrl == undefined));
+    // keycloak internalUrl and peer cannot be used if keycloakUrl is unset
+    assert(!(props.keycloak.url == undefined && props.keycloak.internalUrl != undefined));
+    assert(!(props.keycloak.url == undefined && props.keycloak.peer != undefined));
 
     // must provide a smtp relay
     assert((props.smtp.host != undefined) || (props.smtp.mailpit != undefined));
 
     // optional deployments
-    const useInternalKeycloak            = props.keycloakUrl == undefined;
+    const useInternalKeycloak            = props.keycloak.url == undefined;
     const useInternalMysqlDatabases      = props.mysqlDatabases == undefined;
     const useInternalPostgresqlDatabases = props.postgresqlDatabases == undefined;
     const useMailpit                     = props.smtp.mailpit != undefined;
@@ -145,8 +147,6 @@ export class ShanoirNGChart extends Chart
       // apply the defaults
       namespace: id,
       dockerRepository: defaultDockerRepository(props.version ?? shanoirNGDefaults.version),
-      keycloakUrl: `${props.url}/auth`,
-      keycloakInternalUrl: props.keycloakUrl,
       ...shanoirNGDefaults,
      
       // apply user-provided props
@@ -154,6 +154,7 @@ export class ShanoirNGChart extends Chart
 
       // fill the child props objects
       ingress: {...shanoirIngressDefaults, ...props.ingress},
+      keycloak: this.buildKeycloakProps(props.keycloak, props.url),
       mysqlDatabases: this.buildMysqlDatabasesProps(props.mysqlDatabases),
       networkPolicies: {...shanoirNetworkPoliciesDefaults, ...props.networkPolicies},
       postgresqlDatabases: this.buildPostgresqlDatabasesProps(props.postgresqlDatabases),
@@ -284,11 +285,20 @@ export class ShanoirNGChart extends Chart
     return svc.resourceName! + this.serviceSuffix;
   }
 
-  /** get the internal url of the keycloak service */
-  keycloakInternalUrl(): string
+  /** build the actual keycloak props (from the user-provided props) */
+  buildKeycloakProps(keycloak: ShanoirKeycloakProps, shanoirUrl: string): ShanoirKeycloakProps
   {
-    return this.props.keycloakInternalUrl ??
-      `http://${this.serviceFqdn("keycloak")}:8080/auth`;
+    return (keycloak.url != undefined)
+      // use an external user-provided keycloak server
+      ? { internalUrl: keycloak.url, ...keycloak }
+
+      // use the internal keycloak deployment
+      : {
+        ...keycloak,
+        url: `${shanoirUrl}/auth`,
+        internalUrl: `http://${this.serviceFqdn("keycloak", true)}:8080/auth`,
+        peer: "keycloak",
+      };
   }
 
   /** build the actual smtp props (from the user-provided props) */
@@ -361,7 +371,7 @@ export class ShanoirNGChart extends Chart
         ...Object.entries(this.props.postgresqlDatabases!),
       ].map(([name, cred]) => [name, cred.password])),
 
-      "keycloak-admin": this.props.keycloakCredentials.password,
+      "keycloak-admin": this.props.keycloak.credentials.password,
       "vip-client-secret": this.props.vip!.clientSecret,
       "smtp": this.props.smtp.auth?.password ?? "-",
     }});
@@ -386,7 +396,7 @@ export class ShanoirNGChart extends Chart
       SHANOIR_URL_HOST: this.url.host,
       SHANOIR_VIEWER_OHIF_URL_SCHEME: this.viewerUrl.protocol.replace(/:$/, ""),
       SHANOIR_VIEWER_OHIF_URL_HOST: this.viewerUrl.host,
-      SHANOIR_KEYCLOAK_URL: this.props.keycloakUrl!,
+      SHANOIR_KEYCLOAK_URL: this.props.keycloak.url!,
 
       SHANOIR_ADMIN_EMAIL: this.props.adminEmail,
       SHANOIR_ADMIN_NAME: this.props.adminName,
@@ -441,7 +451,7 @@ export class ShanoirNGChart extends Chart
   private createKeycloakCredentialsEnvVariables(): { [key: string]: EnvValue }
   {
     return {
-      SHANOIR_KEYCLOAK_USER: envValue(this.props.keycloakCredentials.username),
+      SHANOIR_KEYCLOAK_USER: envValue(this.props.keycloak.credentials.username),
       SHANOIR_KEYCLOAK_PASSWORD: this.secretEnvValue("keycloak-admin"),
     };
   }
@@ -835,7 +845,7 @@ echo "\`date\` done"
           envFrom: [ new EnvFrom(self.commonConfigMap), ],
           envVariables: {
             SHANOIR_MIGRATION: envValue(self.props.init! ? "init" : "never"),
-            SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.keycloakInternalUrl()),
+            SHANOIR_KEYCLOAK_INTERNAL_URL: envValue(self.props.keycloak.internalUrl!),
             SHANOIR_STORAGE_TYPE: envValue("file-system"),
             "spring.rabbitmq.host": envValue(self.serviceFqdn("rabbitmq")),
             ...dbVariables,
@@ -863,7 +873,8 @@ echo "\`date\` done"
 
           // In 'init' mode the users container synchronises its user db with keycloak
           // (to populate the keycloak db with the initial users)
-          ...(this.props.init! ? [{host: this.serviceFqdn("keycloak"), port: 8080 }] : []),
+          ...((this.props.init! && this.services["keycloak"] != undefined)
+              ? [{host: this.serviceFqdn("keycloak"), port: 8080 }] : []),
         ]),
         {
           name: "database-migrations",
@@ -881,8 +892,6 @@ echo "\`date\` done"
           envVariables: {
             ...this.keycloakCredentialsEnvVariables,
             ...this.smtpEnvVariables,
-            "kc.admin.client.server.url": envValue(
-              `http://${this.serviceFqdn("keycloak")}:8080/auth`),
             "VIP_SERVICE_EMAIL": envValue(this.props.vip!.serviceEmail),
           },
         }),
@@ -922,7 +931,7 @@ echo "\`date\` done"
     const msEgress = [
       ...rabbitmqEgress,
       {dst: "dcm4chee",                        ports: [NetworkPolicyPort.tcp(8081)]},
-      {dst: "keycloak",                        ports: [NetworkPolicyPort.tcp(8080)]},
+      {dst: this.props.keycloak.peer,          ports: [NetworkPolicyPort.tcp(8080)]},
       {dst: "solr",                            ports: [NetworkPolicyPort.tcp(8983)]},
       {dst: migrationsDb.peer,                 ports: [NetworkPolicyPort.tcp(migrationsDb.port!)]},
       {dst: this.props.smtp.peer ?? "mailpit", ports: [NetworkPolicyPort.tcp(this.props.smtp.port!)]},
@@ -975,8 +984,9 @@ echo "\`date\` done"
   private deployNginx(): Deployment
   {
     return this.createDeployment(this, "nginx", [80], [
-      {dst: "keycloak", ports: [NetworkPolicyPort.tcp(8080)]},
       {dst: "ms",       ports: [NetworkPolicyPort.tcpRange(9901, 9905)]},
+      ...((this.services["keycloak"] != undefined)
+          ? [{dst: "keycloak", ports: [NetworkPolicyPort.tcp(8080)]}] : []),
     ], { containers: [{
       image: this.shanoirImage("nginx"),
       ...noResources,
@@ -986,8 +996,8 @@ echo "\`date\` done"
       envFrom: [ new EnvFrom(this.commonConfigMap)],
       envVariables: {
         ...this.vipEnvVariables,
-        // FIXME: will fail if using an external keycloak server
-        SHANOIR_KEYCLOAK_HOST: envValue(this.serviceFqdn("keycloak")),
+        ...((this.services["keycloak"] != undefined)
+            ? {SHANOIR_KEYCLOAK_HOST: envValue(this.serviceFqdn("keycloak"))} : {}),
         SHANOIR_USERS_HOST: envValue(this.serviceFqdn("ms")),
         SHANOIR_STUDIES_HOST: envValue(this.serviceFqdn("ms")),
         SHANOIR_IMPORT_HOST: envValue(this.serviceFqdn("ms")),
@@ -1033,7 +1043,8 @@ echo "\`date\` done"
     }
 
     if (this.services["keycloak"] != undefined && ingress.exposeKeycloakAdminConsole) { 
-      this.flows.push({src: ingress.peer, dst: "keycloak", ports: [NetworkPolicyPort.tcp(8080)]});
+      this.flows.push({src: ingress.peer, dst: this.props.keycloak.peer!,
+                       ports: [NetworkPolicyPort.tcp(8080)]});
 
       let keycloakBackend = IngressBackend.fromService(this.services["keycloak"]!);
       rules.push({ host: this.url.host, path: "/auth/admin/", backend: keycloakBackend});
