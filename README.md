@@ -163,6 +163,42 @@ Notes:
   You may override them or add extra labels by providing a `label` property in the
   [ChartProps](https://cdk8s.io/docs/latest/reference/cdk8s/typescript/#chartprops).
 
+- Workflow scheduling is deliberately left unconfigured (as the high-level cdk8s constructs do not
+  address it in their props). You can configure the scheduling according to your needs after chart
+  instantiation using the `scheduling` attribute on the objects stored in
+  `ShanoirNGChart.workflows`.
+
+  For example, if you want to colocate all your pods on the same nodes using a
+  `preferredDuringSchedulingIgnoredDuringExecution` affinity, you can write:
+
+  ```ts
+  const chart = new ShanoirNGChart(app, 'shanoir-example', {...YOUR_CHART_PROPERTIES...});
+
+  // instantiate a pod selector matching all pods in the chart using the "app.kubernetes.io/name"
+  // and "app.kubernetes.io/instance" labels
+  const pods = new plus.Pods(chart, "pods", [], {
+    "app.kubernetes.io/name":     chart.labels["app.kubernetes.io/name"],
+    "app.kubernetes.io/instance": chart.labels["app.kubernetes.io/instance"],
+  });
+
+  // configure the affinity on all workloads in the chart
+  gqObject.values(chart.workloads).forEach((w) => w.scheduling.colocate(pods, {weight: 100}));
+  ```
+
+  which will generate the following affinity in your workloads:
+
+  ```yaml
+  affinity:
+    podAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/instance: shanoir-example
+                app.kubernetes.io/name: shanoir-ng
+            topologyKey: kubernetes.io/hostname
+          weight: 100
+  ```
 
 ### 4. generate your manifest
 
