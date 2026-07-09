@@ -154,6 +154,15 @@ Notes:
   ```
   (this will be needed for activating the initial user accounts).
 
+- The chart automatically labels all its resources with:
+  ```yaml
+  app.kubernetes.io/name: "shanoir-ng"
+  app.kubernetes.io/instance: UNIQUE_ID
+  app.kubernetes.io/managed-by: "cdk8s-shanoir"
+  ```
+  You may override them or add extra labels by providing a `label` property in the
+  [ChartProps](https://cdk8s.io/docs/latest/reference/cdk8s/typescript/#chartprops).
+
 
 ### 4. generate your manifest
 

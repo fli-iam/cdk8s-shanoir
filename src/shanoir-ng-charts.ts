@@ -136,7 +136,16 @@ export class ShanoirNGChart extends Chart
     // initialise the object and build the final props
     ///////////////////////////////////////////////////////////////////
 
-    props = {namespace: id, ...props};
+    props = {
+      namespace: id,
+      ...props,
+      labels: {
+        "app.kubernetes.io/name": "shanoir-ng",
+        "app.kubernetes.io/instance": `${[...scope.node.scopes.slice(1), id].join("-")}`,
+        "app.kubernetes.io/managed-by": "cdk8s-shanoir",
+        ...props.labels,
+      },
+    };
     super(scope, id, props);
     this.serviceSuffix = `.${props.namespace}.svc.cluster.local`;
     this.services = {};
