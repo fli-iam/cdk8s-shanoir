@@ -34,7 +34,7 @@ In your `main.ts`, create a `ShanoirNGChart` object for your shanoir instance:
 ```ts
 import { App, Size } from 'cdk8s';
 import { PersistentVolumeClaimProps, PersistentVolumeAccessMode } from 'cdk8s-plus-33'
-import { ShanoirNGChart, shanoirVolumes } from 'cdk8s-shanoir';
+import { ShanoirNGChart } from 'cdk8s-shanoir';
 
 
 const app = new App();
@@ -59,8 +59,8 @@ new ShanoirNGChart(app, 'shanoir-example',
 
   // SMTP parameters for outgoing emails
   smtp: {
-    host: "stmp.example.org",
-    auth: { username: "smtp-user", password: "stmp-pass" },
+    host: "smtp.example.org",
+    auth: { username: "smtp-user", password: "smtp-pass" },
     fromAddress: "no-reply@example.org",
   },
 
