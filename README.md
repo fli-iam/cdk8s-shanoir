@@ -60,6 +60,7 @@ new ShanoirNGChart(app, 'shanoir-example',
   // SMTP parameters for outgoing emails
   smtp: {
     host: "smtp.example.org",
+    peer: NetworkPolicyIpBlock.ipv4(app, "smtp-peer", "192.0.2.1/32"),
     auth: { username: "smtp-user", password: "smtp-pass" },
     fromAddress: "no-reply@example.org",
   },
@@ -118,10 +119,15 @@ Notes:
   [network policy](https://kubernetes.io/docs/concepts/services-networking/network-policies/)
   api objects so as to implement ingress and egress filtering on every pod.
 
-  When external services are involved (eg: the mysql databases are hosted on a server that is not
-  part of the chart), the usual connections parameters `host` and `port` in the
-  `ShanoirDatabaseProps` object must be completed with a `peer` parameter (of type
-  [INetworkPolicy](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.INetworkPolicyPeer))  in order to generate the egress rule matching the destination host.
+  When external services are involved (eg: using an smtp relay or mysql databases hosted outside
+  this chart), the usual connections parameters `host` and `port` in the `ShanoirSmtpProps`
+  or `ShanoirDatabaseProps` object must be completed with a `peer` parameter (that implements
+  [INetworkPolicy](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.INetworkPolicyPeer))
+  in order to generate the egress rule matching the destination host. For that purpose, you may use
+  [NetworkPolicyIpBlock](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.NetworkPolicyIpBlock)
+  to refer to a static IP block or
+  [Pods](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#pods) to refer to
+  other pods deployed in the same k8s cluster (and matched by label).
 
   Likewise, the incoming traffic from the
   [Ingress controller](https://kubernetes.io/docs/concepts/services-networking/ingress/) of the
@@ -129,6 +135,9 @@ Notes:
   traffic from the controller. By default this parameter is set to match the nginx ingress
   controller deployed in the `ingress-nginx` namespace. It must be changed when using a different
   ingress controller.
+
+  If any external peer is missing, the generation of the chart will fail with
+  `ERROR: undefined src peer` or `ERROR: undefined dst peer`.
 
   For troubleshooting purpose, the generation of the ingress or egress rules can be disabled by
   setting `networkPolicies.ingress` or `networkPolicies.egress` to `false`.
