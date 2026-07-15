@@ -68,7 +68,7 @@ new ShanoirNGChart(app, 'shanoir-example',
   keycloak: {
     // Name and password of the keycloak admin account (created in the master realm)
     credentials: { username: "admin", password: "qzflpuy;" },
-  }
+  },
 
   // Persistent volume claims
   volumeClaims: {
