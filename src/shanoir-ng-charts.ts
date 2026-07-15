@@ -1137,7 +1137,7 @@ echo "\`date\` done"
         }
       }
     }
-    error;//assert(!error);
+    assert(!error);
 
     for (const [name, netpol] of Object.entries(netpols)) {
       new NetworkPolicy(this, `netpol-${name}`, netpol)
