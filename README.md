@@ -122,7 +122,7 @@ Notes:
   When external services are involved (eg: using an smtp relay or mysql databases hosted outside
   this chart), the usual connections parameters `host` and `port` in the `ShanoirSmtpProps`
   or `ShanoirDatabaseProps` object must be completed with a `peer` parameter (that implements
-  [INetworkPolicy](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.INetworkPolicyPeer))
+  [INetworkPolicyPeer](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.INetworkPolicyPeer))
   in order to generate the egress rule matching the destination host. For that purpose, you may use
   [NetworkPolicyIpBlock](https://cdk8s.io/docs/latest/reference/cdk8s-plus-33/typescript/#cdk8s-plus-33.NetworkPolicyIpBlock)
   to refer to a static IP block or
