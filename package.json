@@ -6,8 +6,10 @@
   "scripts": {
     "build": "jsii",
     "build:watch": "jsii --watch",
+    "prepare": "npm run build",
     "package": "jsii-pacmak"
   },
+  "files": ["lib", ".jsii"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fli-iam/shanoir-kubernetes.git"
@@ -36,7 +38,9 @@
     "tsc": {
       "outDir": "lib",
       "rootDir": "src",
-      "types": ["node"]
+      "types": [
+        "node"
+      ]
     }
   },
   "bundleDependencies": [
@@ -53,15 +57,15 @@
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
-    "cdk8s": "2.70.48",
-    "cdk8s-plus-33": "2.4.24",
+    "cdk8s": "2.70.83",
+    "cdk8s-plus-33": "2.5.38",
     "constructs": "10.4.5",
     "jsii": "^5.9.26",
     "jsii-pacmak": "^1.126.0"
   },
   "peerDependencies": {
-    "cdk8s": "^2.70.48",
-    "cdk8s-plus-33": "^2.4.24",
+    "cdk8s": "^2.70.83",
+    "cdk8s-plus-33": "^2.5.38",
     "constructs": "^10.4.5"
   }
 }
