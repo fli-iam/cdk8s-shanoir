@@ -12,6 +12,7 @@ cdk8s constructs for shanoir-ng
 Before starting you need to install:
 - [cdk8s](https://cdk8s.io/docs/latest/get-started/)
 - [npm](https://www.npmjs.com/package/npm)
+- [minikube](https://minikube.sigs.k8s.io/docs/start/?arch=%2Flinux%2Fx86-64%2Fstable%2Fbinary+download)
 
 ### 1. initialise a new cdk project
 
