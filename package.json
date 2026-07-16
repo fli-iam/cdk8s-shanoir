@@ -6,8 +6,10 @@
   "scripts": {
     "build": "jsii",
     "build:watch": "jsii --watch",
+    "prepare": "npm run build",
     "package": "jsii-pacmak"
   },
+  "files": ["lib", ".jsii"],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fli-iam/shanoir-kubernetes.git"
