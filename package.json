@@ -55,15 +55,15 @@
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
-    "cdk8s": "^2.70.83",
-    "cdk8s-plus-33": "^2.5.38",
+    "cdk8s": "2.70.83",
+    "cdk8s-plus-33": "2.5.38",
     "constructs": "10.4.5",
     "jsii": "^5.9.26",
     "jsii-pacmak": "^1.126.0"
   },
   "peerDependencies": {
-    "cdk8s": "^2.70.48",
-    "cdk8s-plus-33": "^2.4.24",
+    "cdk8s": "^2.70.83",
+    "cdk8s-plus-33": "^2.5.38",
     "constructs": "^10.4.5"
   }
 }
